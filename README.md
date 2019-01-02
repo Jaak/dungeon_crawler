@@ -1,2 +1,4 @@
-# dungeon_crawler
-Download WoW leaderboard data and analyse it
+# Dungeon Crawler
+
+Download WoW leaderboard data and analyse it. Work in progress and currently
+only contains code for analysis.
