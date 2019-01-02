@@ -100,13 +100,13 @@ MeleeCountPrecentage <- function(Board) {
     return (plot)
 }
 
-SuccessRateByDungeon <- function(Board, KeystoneLevel) {
-    DungeonRuns <- Board[KeystoneLevel==KeystoneLevel,.(Count=.N), keyby=.(Dungeon,Success)]
+SuccessRateByDungeon <- function(Board, L) {
+    DungeonRuns <- Board[KeystoneLevel==L,.(Count=.N), keyby=.(Dungeon,Success)]
     DungeonRuns <- DungeonRuns[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
     plot <- ggplot(DungeonRuns, aes(fill=Success, y=Count, x=reorder(Dungeon, -Count))) +
         geom_bar(stat="identity") +
         theme_bw() +
-        ggtitle(paste("+", KeystoneLevel, " Success rate by dungeon", sep = ""))
+        ggtitle(paste("+", L, " Success rate by dungeon", sep = ""))
     return (plot)
 }
 
