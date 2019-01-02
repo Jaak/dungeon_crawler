@@ -17,6 +17,8 @@ SavePlotAsPng <- function(name, plot) {
     ggsave(name, plot = plot, device = png(), height = 4)
 }
 
+# Using column classes for more efficient representation and faster reading.
+# If this is slow for you can skip columns by marking the respective class as "NA".
 ReadCSVFile <- function(fname) {
 
     colClasses <-
