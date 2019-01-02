@@ -1,0 +1,104 @@
+# load data.table package!
+library(data.table)
+
+# read yummy CSV
+MData <- fread("C:/Users/Tones/Documents/MythicR/out.csv") 
+
+# add column to sum the number of melee DPS
+MData[, NumMelee:=HasFrostDk+HasUnholyDk+HasHavocDh+HasFeralDruid+HasSurvivalHunter+HasWindwalkerMonk+HasRetributionPaladin+HasAssassinationRogue+HasOutlawRogue+HasSubtletyRogue+HasEnhancementShaman+HasArmsWarrior+HasFuryWarrior]
+
+# Duration is in milliseconds; add a time in minutes column to make the next part easier
+MData[,TimeMinutes:=Duration/60000]
+
+# Was the keystone a success? Depends on instance timer. Add the column first
+MData[, Success:="N"]
+
+# Now set success flag for each instance in turn
+MData[Dungeon=="AtalDazar"&TimeMinutes<30, Success:="Y"]
+MData[Dungeon=="Freehold"&TimeMinutes<36, Success:="Y"]
+MData[Dungeon=="TolDagor"&TimeMinutes<36, Success:="Y"]
+MData[Dungeon=="TheMotherlode"&TimeMinutes<39, Success:="Y"]
+MData[Dungeon=="WaycrestManor"&TimeMinutes<39, Success:="Y"]
+MData[Dungeon=="KingsRest"&TimeMinutes<39, Success:="Y"]
+MData[Dungeon=="TempleOfSethraliss"&TimeMinutes<36, Success:="Y"]
+MData[Dungeon=="TheUnderrot"&TimeMinutes<33, Success:="Y"]
+MData[Dungeon=="ShrineOfTheStorms"&TimeMinutes<39, Success:="Y"]
+MData[Dungeon=="SiegeOfBoralus"&TimeMinutes<36, Success:="Y"]
+
+# Question 1: Class representation in each role by keystone level
+# Q1a: Tanks!
+# Need a new mini data table with % of tank class representation by keystone level 
+# Do raw numbers first
+TankRuns <- MData[,.(Count=length(Realm)), keyby=.(KeystoneLevel,Tank)]
+
+# plot dat shit 
+[Tank=="BloodDk",Count],type="l",col="red",xlab="Keystone Level", ylab="Number of Runs", main="Tanks by Keystone Level (raw)")
+lines(TankRuns[Tank=="ProtectionPaladin",KeystoneLevel],TankRuns[Tank=="ProtectionPaladin",Count],type="l",col="#FF6699")
+lines(TankRuns[Tank=="VengenceDh",KeystoneLevel],TankRuns[Tank=="VengenceDh",Count],type="l",col="blueviolet")
+lines(TankRuns[Tank=="BrewmasterMonk",KeystoneLevel],TankRuns[Tank=="BrewmasterMonk",Count],type="l",col="#66FF66")
+lines(TankRuns[Tank=="GuardianDruid",KeystoneLevel],TankRuns[Tank=="GuardianDruid",Count],type="l",col="#FF6600")
+lines(TankRuns[Tank=="ProtectionWarrior",KeystoneLevel],TankRuns[Tank=="ProtectionWarrior",Count],type="l",col="#663300")
+legend(x="topright",legend=c("DK","Pally","DH","Monk","Drood","Warr"),col=c("red","#FF6699","blueviolet","#66FF66","#FF6600","#663300"),lty=c(1,1,1,1,1,1))
+
+# Now percentages 
+TankRuns[,Percent:=sum(Count),by=KeystoneLevel]
+TankRuns[,Percent:=100*Count/Percent]
+
+# plotting time
+plot(TankRuns[Tank=="BloodDk",KeystoneLevel],TankRuns[Tank=="BloodDk",Percent],type="l",col="red",xlab="Keystone Level", ylab="Percentage of Runs", main="Tanks by Keystone Level (%)",ylim=c(0,60))
+lines(TankRuns[Tank=="ProtectionPaladin",KeystoneLevel],TankRuns[Tank=="ProtectionPaladin",Percent],type="l",col="#FF6699")
+lines(TankRuns[Tank=="VengenceDh",KeystoneLevel],TankRuns[Tank=="VengenceDh",Percent],type="l",col="blueviolet")
+lines(TankRuns[Tank=="BrewmasterMonk",KeystoneLevel],TankRuns[Tank=="BrewmasterMonk",Percent],type="l",col="#66FF66")
+lines(TankRuns[Tank=="GuardianDruid",KeystoneLevel],TankRuns[Tank=="GuardianDruid",Percent],type="l",col="#FF6600")
+lines(TankRuns[Tank=="ProtectionWarrior",KeystoneLevel],TankRuns[Tank=="ProtectionWarrior",Percent],type="l",col="#663300")
+legend(x="topleft",legend=c("DK","Pally","DH","Monk","Drood","Warr"),col=c("red","#FF6699","blueviolet","#66FF66","#FF6600","#663300"),lty=c(1,1,1,1,1,1))
+
+# Healers next, and skip straight to % I think.
+HealerRuns <- MData[,.(Count=length(Realm)), keyby=.(KeystoneLevel,Healer)]
+HealerRuns[,Percent:=sum(Count),by=KeystoneLevel]
+HealerRuns[,Percent:=100*Count/Percent]
+
+# plot round 3
+plot(HealerRuns[Healer=="DisciplinePriest",KeystoneLevel],HealerRuns[Healer=="DisciplinePriest",Percent],type="l",xlab="Keystone Level", ylab="Percentage of Runs", main="Healers by Keystone Level (%)",col="#0099FF",ylim=c(0,60))
+lines(HealerRuns[Healer=="HolyPaladin",KeystoneLevel],HealerRuns[Healer=="HolyPaladin",Percent],type="l",col="#FF6699")
+lines(HealerRuns[Healer=="HolyPriest",KeystoneLevel],HealerRuns[Healer=="HolyPriest",Percent],type="l")
+lines(HealerRuns[Healer=="MistweaverMonk",KeystoneLevel],HealerRuns[Healer=="MistweaverMonk",Percent],type="l",col="#66FF66")
+lines(HealerRuns[Healer=="RestorationDruid",KeystoneLevel],HealerRuns[Healer=="RestorationDruid",Percent],type="l",col="#FF6600")
+lines(HealerRuns[Healer=="RestorationShaman",KeystoneLevel],HealerRuns[Healer=="RestorationShaman",Percent],type="l",col="#0000FF")
+lines(HealerRuns[Healer=="",KeystoneLevel],HealerRuns[Healer=="",Percent],type="l",col="red")
+legend(x="topleft",legend=c("Disc","HPala","HPriest","Monk","Tree","Shammy","None!"),col=c("#0099FF","#FF6699","black","#66FF66","#FF6600","#0000FF","red"),lty=c(1,1,1,1,1,1,1))
+
+# Question 2: Keystone level vs success rate, including number of melee in group
+SuccessRuns <- MData[,.(Count=length(Realm)), keyby=.(KeystoneLevel,Success,NumMelee)]
+SuccessRuns[,TotalForKey:=sum(Count),by=.(KeystoneLevel,NumMelee)]
+SuccessRuns[,SuccessForGroup:=100*Count/TotalForKey]
+
+# remove fail rows; just want successes now the counts are in place
+SuccessRuns<-SuccessRuns[Success=="Y",]
+
+# get dat plot
+plot(SuccessRuns[NumMelee==0,KeystoneLevel],SuccessRuns[NumMelee==0,SuccessForGroup],type="l",col="red",xlab="Keystone Level", ylab="Success Rate", main="Success rate by number of melee DPS (%)",ylim=c(20,100))
+lines(SuccessRuns[NumMelee==1,KeystoneLevel],SuccessRuns[NumMelee==1,SuccessForGroup],type="l",col="blue")
+lines(SuccessRuns[NumMelee==2,KeystoneLevel],SuccessRuns[NumMelee==2,SuccessForGroup],type="l",col="green")
+lines(SuccessRuns[NumMelee==3,KeystoneLevel],SuccessRuns[NumMelee==3,SuccessForGroup],type="l",col="black")
+legend(x="bottomleft",legend=c("Zero","One","Two","Three"),col=c("red","blue","green","black"),lty=c(1,1,1,1))
+
+
+# Q3: +15 success rate by dungeon
+# grab the relevant subset
+DungeonRuns <- MData[KeystoneLevel==15,.(Count=.N), keyby=.(Dungeon,Success)]
+
+# **LAZY FIX ALERT** - abbreviate dungeon names to make plot readable :D
+DungeonRuns <- DungeonRuns[Dungeon=="AtalDazar",Dungeon:="AD"]
+DungeonRuns <- DungeonRuns[Dungeon=="Freehold",Dungeon:="FH"]
+DungeonRuns <- DungeonRuns[Dungeon=="TheMotherlode",Dungeon:="ML"]
+DungeonRuns <- DungeonRuns[Dungeon=="TolDagor",Dungeon:="TD"]
+DungeonRuns <- DungeonRuns[Dungeon=="WaycrestManor",Dungeon:="WM"]
+DungeonRuns <- DungeonRuns[Dungeon=="KingsRest",Dungeon:="KR"]
+DungeonRuns <- DungeonRuns[Dungeon=="TempleOfSethraliss",Dungeon:="ToS"]
+DungeonRuns <- DungeonRuns[Dungeon=="TheUnderrot",Dungeon:="UR"]
+DungeonRuns <- DungeonRuns[Dungeon=="ShrineOfTheStorms",Dungeon:="SotS"]
+DungeonRuns <- DungeonRuns[Dungeon=="SiegeOfBoralus",Dungeon:="SoB"]
+
+# gg!
+ggplot(DungeonRuns,aes(fill=Success, y=Count, x=Dungeon)) + geom_bar(stat="identity") + ggtitle("+15 success rate by dungeon")
