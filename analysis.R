@@ -8,8 +8,8 @@ require(ggplot2)
 # 2) shorthand names and
 # 3) completion time limit (in minutes)
 DungeonInfo = data.table(
-    Dungeon = c("AtalDazar", "Freehold", "TolDagor", "TheMotherlode", "WaycrestManor", "KingsRest", "TempleOfSethraliss", "TheUnderrot", "ShrineOfTheStorms", "SiegeOfBoralus"),
-    Shorthand = c("AD", "FH", "TD", "ML", "WM", "KR", "ToS", "UR", "SotS", "SoB"),
+    Dungeon = factor(c("AtalDazar", "Freehold", "TolDagor", "TheMotherlode", "WaycrestManor", "KingsRest", "TempleOfSethraliss", "TheUnderrot", "ShrineOfTheStorms", "SiegeOfBoralus")),
+    Shorthand = factor(c("AD", "FH", "TD", "ML", "WM", "KR", "ToS", "UR", "SotS", "SoB")),
     TimeLimit = c(30, 36, 36, 39, 39, 39, 36, 33, 39, 36)
 )
 
@@ -100,6 +100,16 @@ MeleeCountPrecentage <- function(Board) {
     return (plot)
 }
 
+SuccessRateByDungeon <- function(Board, KeystoneLevel) {
+    DungeonRuns <- Board[KeystoneLevel==KeystoneLevel,.(Count=.N), keyby=.(Dungeon,Success)]
+    DungeonRuns <- DungeonRuns[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
+    plot <- ggplot(DungeonRuns, aes(fill=Success, y=Count, x=Dungeon)) +
+        geom_bar(stat="identity") +
+        theme_bw() +
+        ggtitle(paste("+", KeystoneLevel, " Success rate by dungeon", sep = ""))
+    return (plot)
+}
+
 args <- commandArgs(TRUE)
 
 # Read the leaderboard data
@@ -138,4 +148,8 @@ if (FALSE) {
 
 if (FALSE) {
     SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(Board))
+}
+
+if (FALSE) {
+    SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(Board, 15))
 }
