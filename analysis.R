@@ -26,10 +26,10 @@ ReadCSVFile <- function(fname) {
           "integer64","integer","integer", # Timestamp;Duration;KeystoneLevel
           "factor","factor") # Tank;Healer
 
-    # HasFrostDk;HasUnholyDk;HasHavocDh;HasBalanceDruid;HasFeralDruid;HasBeastMasterHunter
-    # HasMarksmanshipHunter;HasSurvivalHunter;HasArcaneMage;HasFireMage;HasFrostMage;HasWindwalkerMonk
-    # HasRetributionPaladin;HasShadowPriest;HasAssassinationRogue;HasOutlawRogue;HasSubtletyRogue;HasElementalShaman
-    # HasEnhancementShaman;HasAfflictionWarlock;HasDemonologyWarlock;HasDestructionWarlock;HasArmsWarrior;HasFuryWarrior
+    # NumFrostDk;NumUnholyDk;NumHavocDh;NumBalanceDruid;NumFeralDruid;NumBeastMasterHunter
+    # NumMarksmanshipHunter;NumSurvivalHunter;NumArcaneMage;NumFireMage;NumFrostMage;NumWindwalkerMonk
+    # NumRetributionPaladin;NumShadowPriest;NumAssassinationRogue;NumOutlawRogue;NumSubtletyRogue;NumElementalShaman
+    # NumEnhancementShaman;NumAfflictionWarlock;NumDemonologyWarlock;NumDestructionWarlock;NumArmsWarrior;HasFuryWarrior
     colClasses <- c(colClasses, rep("integer", times = 4*6))
     result <- fread(fname, head=TRUE, sep=";", colClasses=colClasses)
     return(result)
@@ -49,7 +49,7 @@ NumberOfRuns <- function(frame) {
     plot <- ggplot(data=summary, aes(x = KeystoneLevel, y = Runs, fill = Dungeon)) +
         geom_bar(stat="identity") +
         theme_bw() +
-        ggtile("Number of runs per keystone level")
+        ggtitle("Number of runs per keystone level")
 
     return (plot)
 }
@@ -59,7 +59,7 @@ SuccessRateBaseOnKeyLevel <- function(Board) {
     plot <- ggplot(data=summary, aes(x = KeystoneLevel, y = SuccessRate, fill=Dungeon)) +
         geom_bar(stat="identity") +
         theme_bw() +
-        ggtitle ("Success rate of each dungeon per keystone level")
+        ggtitle("Success rate of each dungeon per keystone level")
 
     return (plot)
 }
@@ -119,7 +119,7 @@ args <- commandArgs(TRUE)
 Board <- ReadCSVFile(args[1])
 
 # Count number of melee
-Board[,NumMelee:=HasFrostDk+HasUnholyDk+HasHavocDh+HasFeralDruid+HasSurvivalHunter+HasWindwalkerMonk+HasRetributionPaladin+HasAssassinationRogue+HasOutlawRogue+HasSubtletyRogue+HasEnhancementShaman+HasArmsWarrior+HasFuryWarrior]
+Board[,NumMelee:=NumFrostDk+NumUnholyDk+NumHavocDh+NumFeralDruid+NumSurvivalHunter+NumWindwalkerMonk+NumRetributionPaladin+NumAssassinationRogue+NumOutlawRogue+NumSubtletyRogue+NumEnhancementShaman+NumArmsWarrior+NumFuryWarrior]
 
 # More readable duration
 Board[,TimeMinutes:=Duration/60000]
