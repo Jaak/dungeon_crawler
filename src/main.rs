@@ -4,7 +4,7 @@ extern crate log;
 extern crate regex;
 extern crate serde;
 extern crate serde_json;
-extern crate simple_logger;
+extern crate env_logger;
 #[macro_use]
 extern crate static_assertions;
 #[macro_use]
@@ -584,7 +584,7 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    simple_logger::init()?;
+    env_logger::init();
     dotenv().ok();
 
     let client_id = env::var("CLIENT_ID")?;
