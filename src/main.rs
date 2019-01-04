@@ -1,32 +1,32 @@
 extern crate csv;
 extern crate curl;
+extern crate env_logger;
 extern crate log;
 extern crate regex;
 extern crate serde;
 extern crate serde_json;
-extern crate env_logger;
 #[macro_use]
 extern crate static_assertions;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate serde_derive;
-extern crate dotenv;
 extern crate chrono;
 extern crate crossbeam;
+extern crate dotenv;
 #[macro_use]
 extern crate crossbeam_channel;
 
 use chrono::prelude::*;
+use crossbeam_channel::{bounded, tick};
 use curl::easy::{Easy, List};
 use dotenv::dotenv;
-use log::{info, warn, error};
+use log::{error, info, warn};
 use regex::Regex;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::cell::RefCell;
-use std::{thread, time, env, error, str, process};
-use crossbeam_channel::{bounded, tick};
+use std::{env, error, process, str, thread, time};
 
 struct Ctx {
     access_token: String,
@@ -69,9 +69,9 @@ enum Region {
 impl Region {
     pub fn query_str(&self) -> &'static str {
         match self {
-            Region::Eu => return "eu",
-            Region::Us => return "us",
-            Region::Apac => return "apac",
+            Region::Eu => "eu",
+            Region::Us => "us",
+            Region::Apac => "apac",
         }
     }
 }
@@ -380,14 +380,14 @@ mod json {
     #[derive(Deserialize, Debug)]
     pub struct PeriodIndex {
         pub current_period: PeriodId,
-        pub periods: Vec<PeriodId>
+        pub periods: Vec<PeriodId>,
     }
 
     #[derive(Deserialize, Debug)]
     pub struct Period {
         pub id: u32,
         pub start_timestamp: u64,
-        pub end_timestamp: u64
+        pub end_timestamp: u64,
     }
 }
 
@@ -449,7 +449,8 @@ fn write_to_vector(easy: &mut Easy) -> Result<Vec<u8>> {
 }
 
 fn query<T>(ctx: &Ctx, query: String) -> Result<T>
-    where T: serde::de::DeserializeOwned
+where
+    T: serde::de::DeserializeOwned,
 {
     let mut easy = ctx.easy.borrow_mut();
     let query_str = format!(
@@ -468,7 +469,7 @@ fn query<T>(ctx: &Ctx, query: String) -> Result<T>
     match serde_json::from_slice(data.as_slice()) {
         Ok(json_value) => Ok(json_value),
         Err(err) => {
-            let raw_json : serde_json::Value = serde_json::from_slice(data.as_slice())?;
+            let raw_json: serde_json::Value = serde_json::from_slice(data.as_slice())?;
             error!("Failed to parse json string: {}", raw_json);
             Err(Box::new(err))
         }
@@ -476,10 +477,12 @@ fn query<T>(ctx: &Ctx, query: String) -> Result<T>
 }
 
 // Resulting token is just printed out to stdout.
-fn token_request(easy: &mut Easy,
-                 region: Region,
-                 client_id: String,
-                 client_secret: String) -> Result<json::AccessToken> {
+fn token_request(
+    easy: &mut Easy,
+    region: Region,
+    client_id: String,
+    client_secret: String,
+) -> Result<json::AccessToken> {
     let url = format!("https://{region}.battle.net/oauth/token?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
         region=region.query_str(),
         client_id=client_id,
@@ -531,9 +534,14 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
             Regex::new(r"/mythic-leaderboard/(?P<dungeonId>\d+)/period/(?P<period>\d+)").unwrap();
     }
 
-    info!("query_mythic_leaderboard_index({:?}, {})", ctx.region, realm_id);
+    info!(
+        "query_mythic_leaderboard_index({:?}, {})",
+        ctx.region, realm_id
+    );
 
-    let query_obj = GetMythicLeaderboardIndex { connected_realm_id: realm_id };
+    let query_obj = GetMythicLeaderboardIndex {
+        connected_realm_id: realm_id,
+    };
     let leaderboard: json::LeaderboardIndex = query(ctx, query_obj.make_query_string())?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
@@ -555,17 +563,13 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
     Ok(result)
 }
 
-fn query_mythic_leaderboard2(ctx: &Ctx, q: GetMythicLeaderboard) -> Result<json::Leaderboard> {
-    info!("query_mythic_leaderboard({:?}, {}, {}, {})",
+fn query_mythic_leaderboard(ctx: &Ctx, q: GetMythicLeaderboard) -> Result<json::Leaderboard> {
+    info!(
+        "query_mythic_leaderboard({:?}, {}, {}, {})",
         ctx.region, q.connected_realm_id, q.dungeon_id, q.period
     );
 
     query(ctx, q.make_query_string())
-}
-
-fn query_mythic_leaderboard(ctx: &Ctx, realm_id: u32, dungeon_id: u32, period: u32) -> Result<json::Leaderboard> {
-    let q = GetMythicLeaderboard { connected_realm_id: realm_id, dungeon_id, period };
-    query_mythic_leaderboard2(ctx, q)
 }
 
 fn query_period_index(ctx: &Ctx) -> Result<json::PeriodIndex> {
@@ -589,8 +593,9 @@ fn run() -> Result<()> {
 
     let client_id = env::var("CLIENT_ID")?;
     let client_secret = env::var("CLIENT_SECRET")?;
-    let region = Region::Us;
-    let period_id = 678; // TODO: hard coded, think something better out
+    let region = Region::Eu;
+    let num_workers = 5;
+    let period_id = 679; // TODO: hard coded, think something better out
 
     info!("Requesting token...");
     let mut easy = Easy::new();
@@ -603,13 +608,17 @@ fn run() -> Result<()> {
     let gctx = &Ctx {
         access_token: access_token.access_token.clone(),
         region: region,
-        easy: RefCell::new(easy)
+        easy: RefCell::new(easy),
     };
 
     info!("Querying period info (period_id = {})", period_id);
     let period = query_period(gctx, period_id)?;
     let dt = Utc.timestamp_millis(period.start_timestamp as i64);
-    let csv_file_name = format!("{}-leaderboard-{}.csv", dt.format("%Y-%m-%d"), region.query_str());
+    let csv_file_name = format!(
+        "{}-leaderboard-{}.csv",
+        dt.format("%Y-%m-%d"),
+        region.query_str()
+    );
 
     info!("Writing leaderboard to {}", csv_file_name);
     let mut wrt = csv::WriterBuilder::new()
@@ -617,7 +626,6 @@ fn run() -> Result<()> {
         .from_path(csv_file_name)?;
 
     // Create communication channel
-    let num_workers = 5;
     let mut guards = Vec::new();
     {
         let (queries_s, queries_r) = bounded(num_workers);
@@ -625,11 +633,11 @@ fn run() -> Result<()> {
         let ticker = tick(time::Duration::from_secs(5));
 
         // Spawn worker threads
-        for _ in 1 .. num_workers {
+        for _ in 1..num_workers {
             let ctx = Ctx {
                 access_token: access_token.access_token.clone(),
                 region: region,
-                easy: RefCell::new(Easy::new())
+                easy: RefCell::new(Easy::new()),
             };
 
             let queries_r = queries_r.clone();
@@ -637,7 +645,7 @@ fn run() -> Result<()> {
             let guard = thread::spawn(move || -> Result<()> {
                 loop {
                     let q = queries_r.recv()?;
-                    let leaderboard = query_mythic_leaderboard2(&ctx, q)?;
+                    let leaderboard = query_mythic_leaderboard(&ctx, q)?;
                     let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
                     for leading_group in leaderboard.leading_groups.into_iter().flatten() {
                         rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
@@ -669,7 +677,7 @@ fn run() -> Result<()> {
                 let q = GetMythicLeaderboard {
                     connected_realm_id: connected_realm,
                     dungeon_id: index.dungeon_id,
-                    period: period.id
+                    period: period.id,
                 };
 
                 queries_s.send(q)?;
@@ -683,7 +691,7 @@ fn run() -> Result<()> {
 
     for guard in guards {
         match guard.join().unwrap() {
-            Ok(()) => { },
+            Ok(()) => {}
             Err(err) => {
                 warn!("Worker thread error on closing: {}", err);
             }
@@ -692,7 +700,12 @@ fn run() -> Result<()> {
 
     // Following is just a code for testing:
     if false {
-        let leaderboard = query_mythic_leaderboard(gctx, 3657, 244, 659)?;
+        let q = GetMythicLeaderboard {
+            connected_realm_id: 3657,
+            dungeon_id: 244,
+            period: 659,
+        };
+        let leaderboard = query_mythic_leaderboard(gctx, q)?;
         let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
 
         let mut wtr = csv::WriterBuilder::new()
