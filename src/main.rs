@@ -13,6 +13,9 @@ extern crate lazy_static;
 extern crate serde_derive;
 extern crate dotenv;
 extern crate chrono;
+extern crate crossbeam;
+#[macro_use]
+extern crate crossbeam_channel;
 
 use chrono::prelude::*;
 use curl::easy::{Easy, List};
@@ -20,22 +23,18 @@ use dotenv::dotenv;
 use log::{info, warn, error};
 use regex::Regex;
 use std::collections::HashMap;
-use std::process;
 use std::str::FromStr;
-use std::{error, str};
-use std::{thread, time};
-use std::env;
 use std::cell::RefCell;
+use std::{thread, time, env, error, str, process};
+use crossbeam_channel::{bounded, tick};
 
 struct Ctx {
-    duration: time::Duration,
-    instant: RefCell<time::Instant>,
     access_token: String,
     region: Region,
     easy: RefCell<Easy>,
 }
 
-type Result<T> = std::result::Result<T, Box<error::Error>>;
+type Result<T> = std::result::Result<T, Box<error::Error + Send + Sync>>;
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize)]
@@ -176,11 +175,6 @@ struct DataRow {
     num_fury_warrior: u8,
 }
 
-fn add_dps(indicator: &mut u8) -> bool {
-    *indicator += 1;
-    return true;
-}
-
 impl DataRow {
     pub fn new(region: Region, dungeon: Dungeon, group: &json::LeadingGroup) -> DataRow {
         let mut result = DataRow {
@@ -248,41 +242,41 @@ impl DataRow {
 
     fn update_group_composition(&mut self, id: u32) -> bool {
         match id {
-            62 => add_dps(&mut self.num_arcane_mage),
-            63 => add_dps(&mut self.num_fire_mage),
-            64 => add_dps(&mut self.num_frost_mage),
+            62 => { self.num_arcane_mage += 1; true },
+            63 => { self.num_fire_mage += 1; true },
+            64 => { self.num_frost_mage += 1; true },
             65 => self.set_healer(HealerSpecialization::HolyPaladin),
             66 => self.set_tank(TankSpecialization::ProtectionPaladin),
-            70 => add_dps(&mut self.num_retribution_paladin),
-            71 => add_dps(&mut self.num_arms_warrior),
-            72 => add_dps(&mut self.num_fury_warrior),
+            70 => { self.num_retribution_paladin += 1; true },
+            71 => { self.num_arms_warrior += 1; true },
+            72 => { self.num_fury_warrior += 1; true },
             73 => self.set_tank(TankSpecialization::ProtectionWarrior),
-            102 => add_dps(&mut self.num_balance_druid),
-            103 => add_dps(&mut self.num_feral_druid),
+            102 => { self.num_balance_druid += 1; true },
+            103 => { self.num_feral_druid += 1; true },
             104 => self.set_tank(TankSpecialization::GuardianDruid),
             105 => self.set_healer(HealerSpecialization::RestorationDruid),
             250 => self.set_tank(TankSpecialization::BloodDk),
-            251 => add_dps(&mut self.num_frost_dk),
-            252 => add_dps(&mut self.num_unholy_dk),
-            253 => add_dps(&mut self.num_beast_master_hunter),
-            254 => add_dps(&mut self.num_marksmanship_hunter),
-            255 => add_dps(&mut self.num_survival_hunter),
+            251 => { self.num_frost_dk += 1; true },
+            252 => { self.num_unholy_dk += 1; true },
+            253 => { self.num_beast_master_hunter += 1; true },
+            254 => { self.num_marksmanship_hunter += 1; true },
+            255 => { self.num_survival_hunter += 1; true },
             256 => self.set_healer(HealerSpecialization::DisciplinePriest),
             257 => self.set_healer(HealerSpecialization::HolyPriest),
-            258 => add_dps(&mut self.num_shadow_priest),
-            259 => add_dps(&mut self.num_assassination_rogue),
-            260 => add_dps(&mut self.num_outlaw_rogue),
-            261 => add_dps(&mut self.num_subtlety_rogue),
-            262 => add_dps(&mut self.num_elemental_shaman),
-            263 => add_dps(&mut self.num_enhancement_shaman),
+            258 => { self.num_shadow_priest += 1; true },
+            259 => { self.num_assassination_rogue += 1; true },
+            260 => { self.num_outlaw_rogue += 1; true },
+            261 => { self.num_subtlety_rogue += 1; true },
+            262 => { self.num_elemental_shaman += 1; true },
+            263 => { self.num_enhancement_shaman += 1; true },
             264 => self.set_healer(HealerSpecialization::RestorationShaman),
-            265 => add_dps(&mut self.num_affliction_warlock),
-            266 => add_dps(&mut self.num_demonology_warlock),
-            267 => add_dps(&mut self.num_destruction_warlock),
+            265 => { self.num_affliction_warlock += 1; true },
+            266 => { self.num_demonology_warlock += 1; true },
+            267 => { self.num_destruction_warlock += 1; true },
             268 => self.set_tank(TankSpecialization::BrewmasterMonk),
-            269 => add_dps(&mut self.num_windwalker_monk),
+            269 => { self.num_windwalker_monk += 1; true },
             270 => self.set_healer(HealerSpecialization::MistweaverMonk),
-            577 => add_dps(&mut self.num_havoc_dh),
+            577 => { self.num_havoc_dh += 1; true },
             581 => self.set_tank(TankSpecialization::VengenceDh),
             _ => {
                 warn!("Unspecified specialization ID {}", id);
@@ -422,6 +416,7 @@ impl Queryable for GetMythicLeaderboardIndex {
     }
 }
 
+#[derive(Copy, Clone)]
 struct GetMythicLeaderboard {
     connected_realm_id: u32,
     dungeon_id: u32,
@@ -456,16 +451,6 @@ fn write_to_vector(easy: &mut Easy) -> Result<Vec<u8>> {
 fn query<T>(ctx: &Ctx, query: String) -> Result<T>
     where T: serde::de::DeserializeOwned
 {
-    {
-        let mut inst = ctx.instant.borrow_mut();
-        let elapsed = inst.elapsed();
-        if elapsed > ctx.duration {
-            thread::sleep(elapsed - ctx.duration);
-        }
-
-        *inst = time::Instant::now();
-    }
-
     let mut easy = ctx.easy.borrow_mut();
     let query_str = format!(
         "https://{region}.api.blizzard.com/{query}?namespace=dynamic-{region}&locale=en_US",
@@ -540,15 +525,15 @@ struct LeaderboardEntry {
     period: u32,
 }
 
-fn query_mythic_leaderboard_index(ctx: &Ctx, connected_realm_id: u32) -> Result<Vec<LeaderboardEntry>> {
+fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<LeaderboardEntry>> {
     lazy_static! {
         static ref MATCH_URL: Regex =
             Regex::new(r"/mythic-leaderboard/(?P<dungeonId>\d+)/period/(?P<period>\d+)").unwrap();
     }
 
-    info!("query_mythic_leaderboard_index({:?}, {})", ctx.region, connected_realm_id);
+    info!("query_mythic_leaderboard_index({:?}, {})", ctx.region, realm_id);
 
-    let query_obj = GetMythicLeaderboardIndex { connected_realm_id };
+    let query_obj = GetMythicLeaderboardIndex { connected_realm_id: realm_id };
     let leaderboard: json::LeaderboardIndex = query(ctx, query_obj.make_query_string())?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
@@ -570,23 +555,17 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, connected_realm_id: u32) -> Result<
     Ok(result)
 }
 
-fn query_mythic_leaderboard(
-    ctx: &Ctx,
-    connected_realm_id: u32,
-    dungeon_id: u32,
-    period: u32,
-) -> Result<json::Leaderboard> {
+fn query_mythic_leaderboard2(ctx: &Ctx, q: GetMythicLeaderboard) -> Result<json::Leaderboard> {
     info!("query_mythic_leaderboard({:?}, {}, {}, {})",
-        ctx.region, connected_realm_id, dungeon_id, period
+        ctx.region, q.connected_realm_id, q.dungeon_id, q.period
     );
 
-    let query_obj = GetMythicLeaderboard {
-        connected_realm_id,
-        dungeon_id,
-        period,
-    };
-    let leaderboard: json::Leaderboard = query(ctx, query_obj.make_query_string())?;
-    Ok(leaderboard)
+    query(ctx, q.make_query_string())
+}
+
+fn query_mythic_leaderboard(ctx: &Ctx, realm_id: u32, dungeon_id: u32, period: u32) -> Result<json::Leaderboard> {
+    let q = GetMythicLeaderboard { connected_realm_id: realm_id, dungeon_id, period };
+    query_mythic_leaderboard2(ctx, q)
 }
 
 fn query_period_index(ctx: &Ctx) -> Result<json::PeriodIndex> {
@@ -611,61 +590,109 @@ fn run() -> Result<()> {
     let client_id = env::var("CLIENT_ID")?;
     let client_secret = env::var("CLIENT_SECRET")?;
     let region = Region::Us;
-
-    let mut easy = Easy::new();
+    let period_id = 678; // TODO: hard coded, think something better out
 
     info!("Requesting token...");
-    let access_token = token_request(&mut easy, region, client_id, client_secret)?;
+    let mut easy = Easy::new();
+    let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
 
     info!("Booting up...");
     thread::sleep(time::Duration::from_secs(5));
 
-    let ctx = &Ctx {
-        duration: time::Duration::from_millis(100),
-        instant: RefCell::new(time::Instant::now()),
-        access_token: access_token.access_token,
+    // Global context
+    let gctx = &Ctx {
+        access_token: access_token.access_token.clone(),
         region: region,
         easy: RefCell::new(easy)
     };
 
-    if true {
-        let period_id = 676;
+    info!("Querying period info (period_id = {})", period_id);
+    let period = query_period(gctx, period_id)?;
+    let dt = Utc.timestamp_millis(period.start_timestamp as i64);
+    let csv_file_name = format!("{}-leaderboard-{}.csv", dt.format("%Y-%m-%d"), region.query_str());
 
-        info!("Querying period info (period_id = {})", period_id);
-        let period = query_period(ctx, period_id)?;
-        let dt = Utc.timestamp_millis(period.start_timestamp as i64);
-        let csv_file_name = format!("{}-leaderboard-{}.csv", dt.format("%Y-%m-%d"), region.query_str());
+    info!("Writing leaderboard to {}", csv_file_name);
+    let mut wrt = csv::WriterBuilder::new()
+        .delimiter(b';')
+        .from_path(csv_file_name)?;
 
-        info!("Writing leaderboard to {}", csv_file_name);
-        let mut wrt = csv::WriterBuilder::new()
-            .delimiter(b';')
-            .from_path(csv_file_name)?;
+    // Create communication channel
+    let num_workers = 5;
+    let mut guards = Vec::new();
+    {
+        let (queries_s, queries_r) = bounded(num_workers);
+        let (rows_s, rows_r) = bounded(500);
+        let ticker = tick(time::Duration::from_secs(5));
 
-        info!("Gathering connected realm ID-s...");
-        let realms = query_connected_realms(ctx)?;
-        for connected_realm in realms {
-            let realm_leaderboard_index =
-                query_mythic_leaderboard_index(ctx, connected_realm)?;
-            for index in realm_leaderboard_index {
-                let leaderboard = query_mythic_leaderboard(
-                    ctx,
-                    connected_realm,
-                    index.dungeon_id,
-                    period.id,
-                )?;
+        // Spawn worker threads
+        for _ in 1 .. num_workers {
+            let ctx = Ctx {
+                access_token: access_token.access_token.clone(),
+                region: region,
+                easy: RefCell::new(Easy::new())
+            };
 
-                let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-                for leading_group in leaderboard.leading_groups.into_iter().flatten() {
-                    let row = DataRow::new(region, dungeon, &leading_group);
-                    wrt.serialize(row)?;
+            let queries_r = queries_r.clone();
+            let rows_s = rows_s.clone();
+            let guard = thread::spawn(move || -> Result<()> {
+                loop {
+                    let q = queries_r.recv()?;
+                    let leaderboard = query_mythic_leaderboard2(&ctx, q)?;
+                    let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
+                    for leading_group in leaderboard.leading_groups.into_iter().flatten() {
+                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                    }
+                }
+            });
+
+            guards.push(guard);
+        }
+
+        // Spawn thread for writing CSV file
+        let guard = thread::spawn(move || -> Result<()> {
+            loop {
+                select! {
+                    recv(rows_r) -> row => { wrt.serialize(row?)?; },
+                    recv(ticker) -> _ => { wrt.flush()?; },
                 }
             }
+        });
 
-            wrt.flush()?;
+        guards.push(guard);
+
+        info!("Gathering connected realm ID-s...");
+        let realms = query_connected_realms(gctx)?;
+        let mut queries_sent = 0;
+        for connected_realm in realms {
+            let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
+            for index in realm_leaderboard_index {
+                let q = GetMythicLeaderboard {
+                    connected_realm_id: connected_realm,
+                    dungeon_id: index.dungeon_id,
+                    period: period.id
+                };
+
+                queries_s.send(q)?;
+                thread::sleep(time::Duration::from_millis(120));
+                queries_sent += 1;
+            }
         }
+
+        info!("Done! Sent {} leaderboard queries.", queries_sent);
     }
-    else {
-        let leaderboard = query_mythic_leaderboard(ctx, 3657, 244, 659)?;
+
+    for guard in guards {
+        match guard.join().unwrap() {
+            Ok(()) => { },
+            Err(err) => {
+                warn!("Worker thread error on closing: {}", err);
+            }
+        };
+    }
+
+    // Following is just a code for testing:
+    if false {
+        let leaderboard = query_mythic_leaderboard(gctx, 3657, 244, 659)?;
         let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
 
         let mut wtr = csv::WriterBuilder::new()
