@@ -100,6 +100,19 @@ MeleeCountPrecentage <- function(Board) {
     return (plot)
 }
 
+DiversitySuccessRate <- function(Board) {
+    Runs <- Board[,.(Count=.N), keyby=.(KeystoneLevel,Success,Diversity)]
+    Runs[,TotalForKey:=sum(Count),by=.(KeystoneLevel,Diversity)]
+    Runs[,Percent:=100*Count/TotalForKey]
+    Runs <- Runs[(Success)]
+    Runs[,Diversity:=factor(Diversity)]
+    plot <- ggplot(data=Runs, aes(x=KeystoneLevel, y=Percent, color=Diversity)) +
+        geom_line() +
+        theme_bw() +
+        ggtitle("Success rate by number of different realms")
+    return (plot)
+}
+
 SuccessRateByDungeon <- function(Board, L) {
     DungeonRuns <- Board[KeystoneLevel==L,.(Y=sum(Success), N=.N-sum(Success)), keyby=.(Dungeon)]
     DungeonRuns <- melt(DungeonRuns, id.vars=c("Dungeon"), variable.name="Success", value.name="Count")
@@ -117,6 +130,10 @@ args <- commandArgs(TRUE)
 
 # Read the leaderboard data
 Board <- ReadCSVFile(args[1])
+
+# Has to be better way to only get uniques and attach group size
+Board[, Diversity := .N, keyby=.(Timestamp,Duration,Dungeon,KeystoneLevel,Tank,Healer)]
+Board <- unique(Board)
 
 # Count number of melee
 Board[,NumMelee:=NumFrostDk+NumUnholyDk+NumHavocDh+NumFeralDruid+NumSurvivalHunter+NumWindwalkerMonk+NumRetributionPaladin+NumAssassinationRogue+NumOutlawRogue+NumSubtletyRogue+NumEnhancementShaman+NumArmsWarrior+NumFuryWarrior]
