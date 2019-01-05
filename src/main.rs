@@ -619,15 +619,24 @@ fn run() -> Result<()> {
 
             let queries_r = queries_r.clone();
             let rows_s = rows_s.clone();
+            let handle_query = move |q| -> Result<()> {
+                let leaderboard = query_mythic_leaderboard(&ctx, q)?;
+                let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
+                for leading_group in leaderboard.leading_groups.into_iter().flatten() {
+                    rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                }
+
+                Ok(())
+            };
             let guard = thread::spawn(move || -> Result<()> {
                 loop {
-                    let q = queries_r.recv()?;
-                    let leaderboard = query_mythic_leaderboard(&ctx, q)?;
-                    let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-                    for leading_group in leaderboard.leading_groups.into_iter().flatten() {
-                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                    match queries_r.recv() {
+                        Ok(q) => { handle_query(q)?; }
+                        Err(_) => { break; }
                     }
                 }
+
+                Ok(())
             });
 
             guards.push(guard);
@@ -637,10 +646,15 @@ fn run() -> Result<()> {
         let guard = thread::spawn(move || -> Result<()> {
             loop {
                 select! {
-                    recv(rows_r) -> row => { wrt.serialize(row?)?; },
                     recv(ticker) -> _ => { wrt.flush()?; },
+                    recv(rows_r) -> row => match row {
+                        Ok(row) => { wrt.serialize(row)?; },
+                        Err(_) => { break; },
+                    },
                 }
-            }
+            };
+
+            Ok(())
         });
 
         guards.push(guard);
@@ -676,7 +690,7 @@ fn run() -> Result<()> {
         match guard.join().unwrap() {
             Ok(()) => {}
             Err(err) => {
-                warn!("Worker thread error on closing: {}", err);
+                error!("Worker thread error on closing: {}", err);
             }
         };
     }
