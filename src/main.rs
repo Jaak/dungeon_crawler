@@ -192,12 +192,8 @@ impl DataRow {
             result.update_faction(&json_member.faction._type);
         }
 
-        if result.tank.is_none() {
-            warn!("Missing group member with tank specialization.");
-        }
-
-        if result.healer.is_none() {
-            warn!("Missing group member with healer specialization.");
+        if result.faction.is_none() {
+            warn!("Missing faction of a group.");
         }
 
         result
@@ -223,20 +219,11 @@ impl DataRow {
         return true;
     }
 
-    fn update_faction(&mut self, faction_name: &String) -> bool {
+    fn update_faction(&mut self, faction_name: &String) {
         match faction_name.to_uppercase().as_str() {
-            "ALLIANCE" => {
-                self.faction.replace(Faction::ALLIANCE);
-                true
-            }
-            "HORDE" => {
-                self.faction.replace(Faction::HORDE);
-                true
-            }
-            _ => {
-                warn!("Bad faction string in json data: {}", faction_name);
-                false
-            }
+            "ALLIANCE" => { self.faction.replace(Faction::ALLIANCE); },
+            "HORDE" => { self.faction.replace(Faction::HORDE); },
+            _ => {},
         }
     }
 
@@ -534,11 +521,6 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
             Regex::new(r"/mythic-leaderboard/(?P<dungeonId>\d+)/period/(?P<period>\d+)").unwrap();
     }
 
-    info!(
-        "query_mythic_leaderboard_index({:?}, {})",
-        ctx.region, realm_id
-    );
-
     let query_obj = GetMythicLeaderboardIndex {
         connected_realm_id: realm_id,
     };
@@ -564,11 +546,6 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
 }
 
 fn query_mythic_leaderboard(ctx: &Ctx, q: GetMythicLeaderboard) -> Result<json::Leaderboard> {
-    info!(
-        "query_mythic_leaderboard({:?}, {}, {}, {})",
-        ctx.region, q.connected_realm_id, q.dungeon_id, q.period
-    );
-
     query(ctx, q.make_query_string())
 }
 
@@ -594,8 +571,8 @@ fn run() -> Result<()> {
     let client_id = env::var("CLIENT_ID")?;
     let client_secret = env::var("CLIENT_SECRET")?;
     let region = Region::Eu;
-    let num_workers = 5;
-    let period_id = 679; // TODO: hard coded, think something better out
+    let num_workers = 10;
+    let period_id = 672; // TODO: hard coded, think something better out
 
     info!("Requesting token...");
     let mut easy = Easy::new();
@@ -670,6 +647,8 @@ fn run() -> Result<()> {
 
         info!("Gathering connected realm ID-s...");
         let realms = query_connected_realms(gctx)?;
+        let inst = time::Instant::now();
+        let sleep_dur = time::Duration::from_millis(100);
         let mut queries_sent = 0;
         for connected_realm in realms {
             let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
@@ -681,12 +660,16 @@ fn run() -> Result<()> {
                 };
 
                 queries_s.send(q)?;
-                thread::sleep(time::Duration::from_millis(120));
+                thread::sleep(sleep_dur);
                 queries_sent += 1;
             }
         }
 
-        info!("Done! Sent {} leaderboard queries.", queries_sent);
+        let dur = inst.elapsed().as_secs();
+        info!(
+            "Done! Sent {} leaderboard queries in {} seconds ({} queries in seconds).",
+            queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
+        );
     }
 
     for guard in guards {
