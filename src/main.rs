@@ -96,26 +96,19 @@ impl FromStr for Dungeon {
 
     fn from_str(s: &str) -> std::result::Result<Dungeon, Self::Err> {
         lazy_static! {
-            static ref HASH_MAP: HashMap<String, Dungeon> = {
-                let mut m = HashMap::new();
-                m.insert(String::from("Atal'Dazar"), Dungeon::AtalDazar);
-                m.insert(String::from("Freehold"), Dungeon::Freehold);
-                m.insert(String::from("Tol Dagor"), Dungeon::TolDagor);
-                m.insert(String::from("The MOTHERLODE!!"), Dungeon::TheMotherlode);
-                m.insert(String::from("Waycrest Manor"), Dungeon::WaycrestManor);
-                m.insert(String::from("Kings' Rest"), Dungeon::KingsRest);
-                m.insert(
-                    String::from("Temple of Sethraliss"),
-                    Dungeon::TempleOfSethraliss,
-                );
-                m.insert(String::from("The Underrot"), Dungeon::TheUnderrot);
-                m.insert(
-                    String::from("Shrine of the Storm"),
-                    Dungeon::ShrineOfTheStorms,
-                );
-                m.insert(String::from("Siege of Boralus"), Dungeon::SiegeOfBoralus);
-                m
-            };
+            static ref HASH_MAP: HashMap<&'static str, Dungeon> =
+            [
+                ("Atal'Dazar", Dungeon::AtalDazar),
+                ("Freehold", Dungeon::Freehold),
+                ("Tol Dagor", Dungeon::TolDagor),
+                ("The MOTHERLODE!!", Dungeon::TheMotherlode),
+                ("Waycrest Manor", Dungeon::WaycrestManor),
+                ("Kings' Rest", Dungeon::KingsRest),
+                ("Temple of Sethraliss", Dungeon::TempleOfSethraliss),
+                ("The Underrot", Dungeon::TheUnderrot),
+                ("Shrine of the Storm", Dungeon::ShrineOfTheStorms),
+                ("Siege of Boralus", Dungeon::SiegeOfBoralus),
+            ].iter().cloned().collect();
         }
 
         HASH_MAP.get(s).cloned().ok_or("Missing entry")
