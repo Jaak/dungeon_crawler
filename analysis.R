@@ -1,7 +1,7 @@
 require(data.table)
 require(ggplot2)
 require(viridis)
-# require(scales)
+require(scales)
 
 # Some general information about a dungeon
 # Contains:
@@ -13,6 +13,31 @@ DungeonInfo = data.table(
     Shorthand = factor(c("AD", "FH", "TD", "ML", "WM", "KR", "ToS", "UR", "SotS", "SoB")),
     TimeLimit = c(30, 36, 36, 39, 39, 39, 36, 33, 39, 36)
 )
+
+ClassInfo = data.table(
+    Class = c("DeathKnight", "DemonHunter", "Druid", "Hunter", "Mage", "Monk", "Paladin", "Priest", "Rogue", "Shaman", "Warlock", "Warrior"),
+    Color = c("#C41F3B", "#A330C9", "#FF7D0A", "#ABD473", "#40C7EB", "#00FF96", "#F58CBA", "#FFFFFF", "#FFF569", "#0070DE", "#8787ED", "#C79C6E")
+)
+
+SpecInfo = data.table(
+    Spec = c("BloodDk", "FrostDk", "UnholyDk", "HavocDh", "VengeanceDh", "BalanceDruid", "FeralDruid", "GuardianDruid", "RestorationDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "BrewmasterMonk", "MistweaverMonk", "WindwalkerMonk", "HolyPaladin", "ProtectionPaladin", "RetributionPaladin", "DisciplinePriest", "HolyPriest", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "RestorationShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior", "ProtectionWarrior"),
+    Class = c("DeathKnight", "DeathKnight", "DeathKnight", "DemonHunter", "DemonHunter", "Druid", "Druid", "Druid", "Druid", "Hunter", "Hunter", "Hunter", "Mage", "Mage", "Mage", "Monk", "Monk", "Monk", "Paladin", "Paladin", "Paladin", "Priest", "Priest", "Priest", "Rogue", "Rogue", "Rogue", "Shaman", "Shaman", "Shaman", "Warlock", "Warlock", "Warlock", "Warrior", "Warrior", "Warrior"),
+    Role = c("Tank", "Melee", "Melee", "Melee", "Tank", "Ranged", "Melee", "Tank", "Healer", "Ranged", "Ranged", "Melee", "Ranged", "Ranged", "Ranged", "Tank", "Healer", "Melee", "Healer", "Tank", "Melee", "Healer", "Healer", "Ranged", "Melee", "Melee", "Melee", "Ranged", "Melee", "Healer", "Ranged", "Ranged", "Ranged", "Melee", "Melee", "Tank")
+)
+
+# For each spec the color of choice
+SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
+TankColorTable <- SpecColorTable[Role == "Tank"]
+TankColors <- TankColorTable$Color
+names(TankColors) <- TankColorTable$Spec
+
+AffixCombinations = data.table(
+    Id = c(1,2,3,4,5,6,7,8,9,10,11,12),
+    Affix1 = factor(rep(c("Fortified", "Tyrannical"), times = 6))
+)
+
+# print(AffixCombinations)
+# exit(1)
 
 SavePlotAsPng <- function(name, plot) {
     ggsave(name, plot = plot, device = png(), height = 4)
@@ -43,7 +68,6 @@ RunDurationBoxplot <- function(Board) {
         stat_boxplot(geom ='errorbar', lwd=0.25) +
         geom_boxplot(lwd=0.25, outlier.size = 0.1) +
         geom_point(aes(x=Shorthand, y=TimeLimit, color=Shorthand), data = DungeonInfo, size = 2) +
-        theme_bw() +
         scale_y_log10() +
         xlab("Dungeon") +
         ylab("Time (in minutes)") +
@@ -56,7 +80,6 @@ NumberOfRuns <- function(frame) {
     summary <- frame[, list(Runs = .N), keyby=.(KeystoneLevel,Dungeon)]
     plot <- ggplot(data=summary, aes(x = factor(KeystoneLevel), y = Runs, fill = Dungeon)) +
         geom_bar(stat="identity") +
-        theme_bw() +
         xlab("Keystone level") +
         ggtitle("Number of runs per keystone level")
 
@@ -67,7 +90,6 @@ SuccessRateBaseOnKeyLevel <- function(Board) {
     summary <- Board[, list(SuccessRate = sum(Success) / .N), keyby=.(KeystoneLevel, Dungeon)]
     plot <- ggplot(data=summary, aes(x = factor(KeystoneLevel), y = SuccessRate, fill=Dungeon)) +
         geom_bar(stat="identity") +
-        theme_bw() +
         xlab("Keystone level") +
         ggtitle("Success rate of each dungeon per keystone level")
 
@@ -81,8 +103,8 @@ TankPrecentage <- function(Board) {
     TankRuns <- TankRuns[Count > 1]
     KeyRange <- 2:max(TankRuns$KeystoneLevel)
     plot <- ggplot(data=TankRuns, aes(x=KeystoneLevel, y=Percent, color=Tank)) +
+        scale_color_manual(values = TankColors) +
         geom_line() +
-        theme_bw() +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
         xlab("Keystone level") +
         ggtitle("Tanks by keystone level")
@@ -97,7 +119,6 @@ HealerPrecentage <- function(Board) {
     KeyRange <- 2:max(HealerRuns$KeystoneLevel)
     plot <- ggplot(data=HealerRuns, aes(x=KeystoneLevel, y=Percent, color=Healer)) +
         geom_line() +
-        theme_bw() +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
         xlab("Keystone level") +
         ggtitle("Healers by keystone level")
@@ -115,7 +136,6 @@ MeleeCountPrecentage <- function(Board) {
     plot <- ggplot(data=MeleeRuns, aes(x=KeystoneLevel, y=Percent, color=NumMelee)) +
         geom_line() +
         geom_point() +
-        theme_bw() +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
         xlab("Keystone level") +
         ggtitle("Success rate by number of melee")
@@ -131,7 +151,6 @@ TankSuccessByKey <- function(Board) {
     Tbl <- Tbl[TotalChances, on = 'KeystoneLevel', Ratio := Chance / AvgChance]
     plot <- ggplot(data=Tbl, aes(x=factor(KeystoneLevel), y=Ratio, color=Tank)) +
         geom_line() +
-        theme_bw() +
         xlab("Keystone level") +
         ggtitle("Success rate by tank")
     return (plot)
@@ -145,7 +164,6 @@ DiversitySuccessRate <- function(Board) {
     Runs[,Diversity:=factor(Diversity)]
     plot <- ggplot(data=Runs, aes(x=factor(KeystoneLevel), y=Percent, color=Diversity)) +
         geom_line() +
-        theme_bw() +
         xlab("Keystone level") +
         ggtitle("Success rate by number of different realms")
     return (plot)
@@ -158,7 +176,6 @@ SuccessRateByDungeon <- function(Board, L) {
     DungeonRuns <- DungeonRuns[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
     plot <- ggplot(DungeonRuns, aes(fill=Success, y=Count, x=reorder(Dungeon,-Count))) +
         geom_bar(stat="identity") +
-        theme_bw() +
         ggtitle(paste("+", L, " Success rate by dungeon", sep = "")) +
         xlab("Dungeon")
     return (plot)
@@ -174,7 +191,6 @@ HealerHeatmap <- function(Board, L) {
         scale_fill_viridis(option = "cividis") +
         geom_tile(aes(fill = SuccessRate), colour = "white") +
         geom_text(aes(label = round(SuccessRate, 1)), size=2) +
-        theme_bw() +
         coord_equal() +
         xlab("Dungeon") +
         ylab("Healer") +
@@ -211,11 +227,19 @@ KeystoneLevelHeatmap <- function(Board) {
         scale_fill_viridis(option = "cividis") +
         geom_text(aes(label = round(SuccessRate, 1)), size=2) +
         scale_x_discrete(breaks=KeyRange, labels=factor(KeyRange)) +
-        theme_bw() +
         coord_equal() +
         xlab("Keystone level") +
         ylab("Dungeon") +
         ggtitle("Success rate for each dungeon and keystone level combination")
+    return (plot)
+}
+
+RunStartTimeDistribution <- function(Board) {
+    Tbl <- Board[,.(Hour=as.POSIXct(round(Datetime, "hour")))]
+    Tbl <- Tbl[, .(Count = .N), keyby=.(Hour)]
+    plot <- ggplot(data=Tbl, aes(x=Hour, y=Count)) +
+        geom_bar(stat = "identity") +
+        scale_x_datetime(breaks = date_breaks("1 day"))
     return (plot)
 }
 
@@ -237,9 +261,21 @@ Board[,TimeMinutes:=Duration/60000]
 # Attach information if run was successfully on time or not
 Board <- Board[DungeonInfo, on='Dungeon', Success:=TimeMinutes<=TimeLimit]
 
+Board[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01")]
+
+#
+# General style
+#
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
 #
 # Bunch of graphs:
 #
+
+if (FALSE) {
+    SavePlotAsPng("timestamp.png", RunStartTimeDistribution(Board))
+}
 
 if (FALSE) {
     SavePlotAsPng("number-of-runs.png", NumberOfRuns(Board))
@@ -253,11 +289,11 @@ if (FALSE) {
     SavePlotAsPng("healer-precentage.png", HealerPrecentage(Board))
 }
 
-if (TRUE) {
+if (FALSE) {
     SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Board, 15))
 }
 
-if (TRUE) {
+if (FALSE) {
     SavePlotAsPng("tank-heatmap.png", TankHeatmap(Board, 15))
 }
 
@@ -269,7 +305,7 @@ if (FALSE) {
     SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(Board, 15))
 }
 
-if (TRUE) {
+if (FALSE) {
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Board))
 }
 
