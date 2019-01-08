@@ -42,7 +42,7 @@ enum TankSpecialization {
     ProtectionPaladin = 1,
     ProtectionWarrior,
     BloodDk,
-    VengenceDh,
+    VengeanceDh,
     GuardianDruid,
     BrewmasterMonk,
 }
@@ -63,7 +63,8 @@ enum HealerSpecialization {
 enum Region {
     Eu = 1,
     Us,
-    Apac,
+    Kr,
+    Tw
 }
 
 impl Region {
@@ -71,7 +72,17 @@ impl Region {
         match self {
             Region::Eu => "eu",
             Region::Us => "us",
-            Region::Apac => "apac",
+            Region::Kr => "kr",
+            Region::Tw => "tw",
+        }
+    }
+
+    pub fn token_str(&self) -> &'static str {
+        match self {
+            Region::Eu => "eu",
+            Region::Us => "us",
+            Region::Kr => "apac",
+            Region::Tw => "apac",
         }
     }
 }
@@ -257,7 +268,7 @@ impl DataRow {
             269 => { self.num_windwalker_monk += 1; true },
             270 => self.set_healer(HealerSpecialization::MistweaverMonk),
             577 => { self.num_havoc_dh += 1; true },
-            581 => self.set_tank(TankSpecialization::VengenceDh),
+            581 => self.set_tank(TankSpecialization::VengeanceDh),
             _ => {
                 warn!("Unspecified specialization ID {}", id);
                 false
@@ -464,7 +475,7 @@ fn token_request(
     client_secret: String,
 ) -> Result<json::AccessToken> {
     let url = format!("https://{region}.battle.net/oauth/token?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
-        region=region.query_str(),
+        region=region.token_str(),
         client_id=client_id,
         client_secret=client_secret
     );
@@ -565,7 +576,8 @@ fn run() -> Result<()> {
     let client_secret = env::var("CLIENT_SECRET")?;
     let region = Region::Eu;
     let num_workers = 10;
-    let period_id = 672; // TODO: hard coded, think something better out
+    let sleep_dur = time::Duration::from_millis(100);
+    let period_id = 679; // TODO: hard coded, think something better out
 
     info!("Requesting token...");
     let mut easy = Easy::new();
@@ -674,7 +686,7 @@ fn run() -> Result<()> {
 
         let dur = inst.elapsed().as_secs();
         info!(
-            "Done! Sent {} leaderboard queries in {} seconds ({} queries in seconds).",
+            "Done! Sent {} leaderboard queries in {} seconds ({} queries per seconds).",
             queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
         );
     }
