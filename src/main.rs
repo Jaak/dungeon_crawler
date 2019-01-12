@@ -26,7 +26,7 @@ use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::{env, error, process, str, thread, time};
+use std::{env, error, process, str, thread, time, path, fs};
 
 struct Ctx {
     access_token: String,
@@ -205,7 +205,6 @@ impl DataRow {
 
     fn set_healer(&mut self, spec: HealerSpecialization) -> bool {
         if self.healer.is_some() {
-            warn!("Duplicate healer specialization in group ({:?})", spec);
             return false;
         }
 
@@ -215,7 +214,6 @@ impl DataRow {
 
     fn set_tank(&mut self, spec: TankSpecialization) -> bool {
         if self.tank.is_some() {
-            warn!("Duplicate tank specialization in group ({:?})", spec);
             return false;
         }
 
@@ -549,7 +547,7 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
     Ok(result)
 }
 
-fn query_mythic_leaderboard(ctx: &Ctx, q: GetMythicLeaderboard) -> Result<json::Leaderboard> {
+fn query_mythic_leaderboard(ctx: &Ctx, q: &GetMythicLeaderboard) -> Result<json::Leaderboard> {
     query(ctx, q.make_query_string())
 }
 
@@ -576,15 +574,23 @@ fn run() -> Result<()> {
     let client_secret = env::var("CLIENT_SECRET")?;
     let region = Region::Eu;
     let num_workers = 10;
-    let sleep_dur = time::Duration::from_millis(100);
-    let period_id = 679; // TODO: hard coded, think something better out
+    let sleep_dur = time::Duration::from_millis(10);
+    let period_id = 661; // TODO: hard coded, think something better out
+
+    // 662 -- 2018-09-05
+    // 663 -- 2018-09-12
+    // 664 -- 2018-09-19
+    // 665 -- 2018-09-26
+    // 666 -- 2018-10-03
+    // 667 -- 2018-10-10
+    // 668 -- 2018-10-17
+    // 669 -- 2018-10-24
+    // ...
+    // 680 -- 2019-01-09
 
     info!("Requesting token...");
     let mut easy = Easy::new();
     let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
-
-    info!("Booting up...");
-    thread::sleep(time::Duration::from_secs(5));
 
     // Global context
     let gctx = &Ctx {
@@ -602,37 +608,61 @@ fn run() -> Result<()> {
         region.query_str()
     );
 
-    info!("Writing leaderboard to {}", csv_file_name);
-    let mut wrt = csv::WriterBuilder::new()
-        .delimiter(b';')
-        .from_path(csv_file_name)?;
+    let path = path::Path::new(&csv_file_name);
+    let exists = path.exists();
+    let create = ! exists;
+    if exists &&  ! path.is_file() {
+        error!("Existing \'{:?}\' is not a file.", path);
+        process::exit(1);
+    }
 
-    // Create communication channel
+    if exists {
+        info!("Path already exists, appending data!");
+    }
+
+    info!("Writing leaderboard to {}", csv_file_name);
+    let file = fs::OpenOptions::new()
+        .append(true).write(true).create(create).open(&path)?;
+
+    let mut wrt = csv::WriterBuilder::new()
+        .delimiter(b';').has_headers(create).from_writer(file);
+
     let mut guards = Vec::new();
     {
+        // Main thread sends queries to worker threads:
         let (queries_s, queries_r) = bounded(num_workers);
-        let (rows_s, rows_r) = bounded(500);
-        let ticker = tick(time::Duration::from_secs(5));
+
+        // Worker threads send CSV rows to CSV writer thread:
+        let (rows_s, rows_r) = bounded(num_workers);
+
+        // Ticker to flush the CSV file every second:
+        let ticker = tick(time::Duration::from_secs(1));
 
         // Spawn worker threads
         for _ in 1..num_workers {
+            let mut easy = Easy::new();
+            easy.accept_encoding("gzip")?;
+
             let ctx = Ctx {
                 access_token: access_token.access_token.clone(),
                 region: region,
-                easy: RefCell::new(Easy::new()),
+                easy: RefCell::new(easy),
             };
 
-            let queries_r = queries_r.clone();
             let rows_s = rows_s.clone();
             let handle_query = move |q| -> Result<()> {
-                let leaderboard = query_mythic_leaderboard(&ctx, q)?;
+                let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
                 let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-                for leading_group in leaderboard.leading_groups.into_iter().flatten() {
-                    rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                if let Some(leading_groups) = leaderboard.leading_groups {
+                    for leading_group in leading_groups {
+                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                    }
                 }
 
                 Ok(())
             };
+
+            let queries_r = queries_r.clone();
             let guard = thread::spawn(move || -> Result<()> {
                 loop {
                     match queries_r.recv() {
@@ -667,7 +697,6 @@ fn run() -> Result<()> {
         info!("Gathering connected realm ID-s...");
         let realms = query_connected_realms(gctx)?;
         let inst = time::Instant::now();
-        let sleep_dur = time::Duration::from_millis(100);
         let mut queries_sent = 0;
         for connected_realm in realms {
             let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
@@ -698,27 +727,6 @@ fn run() -> Result<()> {
                 error!("Worker thread error on closing: {}", err);
             }
         };
-    }
-
-    // Following is just a code for testing:
-    if false {
-        let q = GetMythicLeaderboard {
-            connected_realm_id: 3657,
-            dungeon_id: 244,
-            period: 659,
-        };
-        let leaderboard = query_mythic_leaderboard(gctx, q)?;
-        let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b';')
-            .from_path("out.csv")?;
-        for leading_group in leaderboard.leading_groups.into_iter().flatten() {
-            let row = DataRow::new(region, dungeon, &leading_group);
-            wtr.serialize(row)?;
-        }
-
-        wtr.flush()?;
     }
 
     Ok(())
