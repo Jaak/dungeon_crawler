@@ -1,7 +1,7 @@
-require(data.table)
-require(ggplot2)
-require(viridis)
-require(scales)
+library(data.table)
+library(ggplot2)
+library(viridis)
+library(scales)
 
 # Some general information about a dungeon
 # Contains:
@@ -64,7 +64,7 @@ ReadCSVFile <- function(fname) {
 RunDurationBoxplot <- function(Board) {
     Tbl <- Board[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
     Tbl <- Tbl[KeystoneLevel >= 10]
-    plot <- ggplot (Tbl, aes(x = reorder(Dungeon, TimeMinutes, mean), y = TimeMinutes, color = Dungeon)) +
+    plot <- ggplot (Tbl, aes(x = reorder(Dungeon, TimeMinutes, median), y = TimeMinutes, color = Dungeon)) +
         stat_boxplot(geom ='errorbar', lwd=0.25) +
         geom_boxplot(lwd=0.25, outlier.size = 0.1) +
         geom_point(aes(x=Shorthand, y=TimeLimit, color=Shorthand), data = DungeonInfo, size = 2) +
@@ -78,10 +78,25 @@ RunDurationBoxplot <- function(Board) {
 
 NumberOfRuns <- function(frame) {
     summary <- frame[, list(Runs = .N), keyby=.(KeystoneLevel,Dungeon)]
-    plot <- ggplot(data=summary, aes(x = factor(KeystoneLevel), y = Runs, fill = Dungeon)) +
+    plot <- ggplot(data=summary, aes(x = factor(KeystoneLevel), y = Runs)) +
         geom_bar(stat="identity") +
         xlab("Keystone level") +
         ggtitle("Number of runs per keystone level")
+
+    return (plot)
+}
+
+DungeonPopularity <- function(Board) {
+    Dungeons <- Board[, .(Count = .N), keyby=.(KeystoneLevel,Dungeon)]
+    Dungeons <- Dungeons[CJ(KeystoneLevel, Dungeon, unique=TRUE)][is.na(Count), Count := 0]
+    plot <- ggplot(data=Dungeons,
+            aes(x = KeystoneLevel,
+                y = Count,
+                fill = reorder(Dungeon, -Count, sum))) +
+        geom_area(position="fill") +
+        scale_y_continuous(labels = percent) +
+        xlab("Keystone level") +
+        ggtitle("Popularity of dungeons based on keystone level")
 
     return (plot)
 }
@@ -98,15 +113,21 @@ SuccessRateBaseOnKeyLevel <- function(Board) {
 
 TankPrecentage <- function(Board) {
     TankRuns <- Board[Tank != "",.(Count=.N), keyby=.(KeystoneLevel,Tank)]
-    TankRuns[,Percent:=sum(Count),by=KeystoneLevel]
-    TankRuns[,Percent:=100*Count/Percent]
-    TankRuns <- TankRuns[Count > 1]
+    TankRuns[, Percent := sum(Count), by=KeystoneLevel]
+    TankRuns[, Percent := Count/Percent]
     KeyRange <- 2:max(TankRuns$KeystoneLevel)
-    plot <- ggplot(data=TankRuns, aes(x=KeystoneLevel, y=Percent, color=Tank)) +
+    plot <- ggplot(data=TankRuns,
+        aes(x=KeystoneLevel, y=Percent, color=Tank)) +
         scale_color_manual(values = TankColors) +
         geom_line() +
-        scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
+        scale_x_continuous(
+            breaks=KeyRange[KeyRange %% 5 == 0],
+            minor_breaks=KeyRange) +
+        scale_y_continuous(labels = percent) +
+        # scale_fill_manual(values = TankColors, name = "Tank") +
+        # geom_area(position="fill") +
         xlab("Keystone level") +
+        ylab("Percentage of tanks") +
         ggtitle("Tanks by keystone level")
     return (plot)
 }
@@ -114,12 +135,12 @@ TankPrecentage <- function(Board) {
 HealerPrecentage <- function(Board) {
     HealerRuns <- Board[Healer != "",.(Count=.N), keyby=.(KeystoneLevel,Healer)]
     HealerRuns[,Percent:=sum(Count),by=KeystoneLevel]
-    HealerRuns[,Percent:=100*Count/Percent]
-    HealerRuns <- HealerRuns[Count > 1]
+    HealerRuns[,Percent:=Count/Percent]
     KeyRange <- 2:max(HealerRuns$KeystoneLevel)
     plot <- ggplot(data=HealerRuns, aes(x=KeystoneLevel, y=Percent, color=Healer)) +
         geom_line() +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
+        scale_y_continuous(labels = percent) +
         xlab("Keystone level") +
         ggtitle("Healers by keystone level")
     return (plot)
@@ -128,7 +149,7 @@ HealerPrecentage <- function(Board) {
 MeleeCountPrecentage <- function(Board) {
     MeleeRuns <- Board[
         ,
-        .(Count = sum(Success), Percent=100.0 * sum(Success) / .N),
+        .(Count = sum(Success), Percent=sum(Success) / .N),
         keyby=.(KeystoneLevel,NumMelee)]
     MeleeRuns <- MeleeRuns[Count > 1]
     KeyRange <- 2:max(MeleeRuns$KeystoneLevel)
@@ -137,6 +158,7 @@ MeleeCountPrecentage <- function(Board) {
         geom_line() +
         geom_point() +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
+        scale_y_continuous(labels = percent) +
         xlab("Keystone level") +
         ggtitle("Success rate by number of melee")
     return (plot)
@@ -156,25 +178,12 @@ TankSuccessByKey <- function(Board) {
     return (plot)
 }
 
-DiversitySuccessRate <- function(Board) {
-    Runs <- Board[,.(Count=.N), keyby=.(KeystoneLevel,Success,Diversity)]
-    Runs[,TotalForKey:=sum(Count),by=.(KeystoneLevel,Diversity)]
-    Runs[,Percent:=100*Count/TotalForKey]
-    Runs <- Runs[(Success)]
-    Runs[,Diversity:=factor(Diversity)]
-    plot <- ggplot(data=Runs, aes(x=factor(KeystoneLevel), y=Percent, color=Diversity)) +
-        geom_line() +
-        xlab("Keystone level") +
-        ggtitle("Success rate by number of different realms")
-    return (plot)
-}
-
 SuccessRateByDungeon <- function(Board, L) {
-    DungeonRuns <- Board[KeystoneLevel==L,.(Y=sum(Success), N=.N-sum(Success)), keyby=.(Dungeon)]
-    DungeonRuns <- melt(DungeonRuns, id.vars=c("Dungeon"), variable.name="Success", value.name="Count")
-    DungeonRuns[,Success:=Success=="Y"]
+    DungeonRuns <- Board[KeystoneLevel==L,.(Count=.N), keyby=.(Dungeon, Success)]
+    # Not needed any more but here to remind myself of how to fill in missing values:
+    # DungeonRuns <- DungeonRuns[CJ(Dungeon, Success, unique=TRUE)][is.na(Count), Count := 0]
     DungeonRuns <- DungeonRuns[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
-    plot <- ggplot(DungeonRuns, aes(fill=Success, y=Count, x=reorder(Dungeon,-Count))) +
+    plot <- ggplot(DungeonRuns, aes(y=Count, x=reorder(Dungeon,-Count,sum), fill=Success)) +
         geom_bar(stat="identity") +
         ggtitle(paste("+", L, " Success rate by dungeon", sep = "")) +
         xlab("Dungeon")
@@ -216,17 +225,17 @@ TankHeatmap <- function(Board, L) {
 }
 
 KeystoneLevelHeatmap <- function(Board) {
-    Tbl <- Board[,
-                 .(SuccessRate=sum(Success) / .N),
-                 keyby=.(Dungeon, KeystoneLevel)]
+    Ord <- Board[, .(AvgSuccess = sum(Success) / .N), keyby=.(Dungeon)]
+    Tbl <- Board[, .(SuccessRate=sum(Success) / .N), keyby=.(Dungeon, KeystoneLevel)]
+    Tbl <- Tbl[Ord, on = 'Dungeon']
     KeyRange <- 2:max(Tbl$KeystoneLevel)
     Tbl <- Tbl[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
     plot <- ggplot(data=Tbl, aes(x=factor(KeystoneLevel),
-                                 y=reorder(Dungeon, SuccessRate, mean))) +
+                                 y=reorder(Dungeon, AvgSuccess, first))) +
         geom_tile(aes(fill = SuccessRate), colour = "white") +
         scale_fill_viridis(option = "cividis") +
         geom_text(aes(label = round(SuccessRate, 1)), size=2) +
-        scale_x_discrete(breaks=KeyRange, labels=factor(KeyRange)) +
+        scale_x_discrete(breaks=KeyRange, labels=KeyRange) +
         coord_equal() +
         xlab("Keystone level") +
         ylab("Dungeon") +
@@ -249,7 +258,6 @@ args <- commandArgs(TRUE)
 Board <- ReadCSVFile(args[1])
 
 # Has to be better way to only get uniques and attach group size
-Board[, Diversity := .N, keyby=.(Timestamp,Duration,Dungeon,KeystoneLevel,Tank,Healer)]
 Board <- unique(Board)
 
 # Count number of melee
@@ -267,58 +275,73 @@ Board[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01")]
 # General style
 #
 
-theme_set(theme_bw())  # pre-set the bw theme.
+theme_set(theme_bw())
+
+#
+# Plotly test:
+#
+
+if (FALSE) {
+    library(plotly)
+    p <- SuccessRateByDungeonA(Board)
+    p <- ggplotly(p)
+    htmlwidgets::saveWidget(as_widget(p), "graph.html")
+}
 
 #
 # Bunch of graphs:
 #
 
-if (FALSE) {
-    SavePlotAsPng("timestamp.png", RunStartTimeDistribution(Board))
-}
-
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("number-of-runs.png", NumberOfRuns(Board))
 }
 
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("tank-precentage.png", TankPrecentage(Board))
 }
 
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("healer-precentage.png", HealerPrecentage(Board))
 }
 
-if (FALSE) {
-    SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Board, 15))
-}
-
-if (FALSE) {
-    SavePlotAsPng("tank-heatmap.png", TankHeatmap(Board, 15))
-}
-
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(Board))
 }
 
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(Board, 15))
 }
 
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Board))
 }
 
-if (FALSE) {
+if (TRUE) {
     SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Board))
 }
 
 #
-# A bit useless plots:
+# Occasionally interesting plots:
+#
+
+if (TRUE) {
+    SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Board, 15))
+}
+
+if (TRUE) {
+    SavePlotAsPng("tank-heatmap.png", TankHeatmap(Board, 15))
+}
+
+#
+# A bit boring but still little informative plots:
 #
 
 if (FALSE) {
-    SavePlotAsPng("group-diversity-success-rate.png", DiversitySuccessRate(Board))
+    SavePlotAsPng("dungeon-popularity.png", DungeonPopularity(Board))
+}
+
+if (FALSE) {
+    SavePlotAsPng("timestamp.png", RunStartTimeDistribution(Board))
 }
 
 if (FALSE) {
