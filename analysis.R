@@ -3,27 +3,38 @@ library(ggplot2)
 library(viridis)
 library(scales)
 
-# Some general information about a dungeon
-# Contains:
-# 1) dungeon name in data
-# 2) shorthand names and
-# 3) completion time limit (in minutes)
-DungeonInfo = data.table(
-    Dungeon = factor(c("AtalDazar", "Freehold", "TolDagor", "TheMotherlode", "WaycrestManor", "KingsRest", "TempleOfSethraliss", "TheUnderrot", "ShrineOfTheStorms", "SiegeOfBoralus")),
-    Shorthand = factor(c("AD", "FH", "TD", "ML", "WM", "KR", "ToS", "UR", "SotS", "SoB")),
-    TimeLimit = c(30, 36, 36, 39, 39, 39, 36, 33, 39, 36)
-)
+ReadSpecInfo <- function() {
+    colClasses <- c("factor","factor","factor")
+    result <- fread("data/static/spec-info.csv",
+                    head=TRUE, sep=";", colClasses=colClasses, key=c("Spec"))
+    return(result)
+}
 
-ClassInfo = data.table(
-    Class = c("DeathKnight", "DemonHunter", "Druid", "Hunter", "Mage", "Monk", "Paladin", "Priest", "Rogue", "Shaman", "Warlock", "Warrior"),
-    Color = c("#C41F3B", "#A330C9", "#FF7D0A", "#ABD473", "#40C7EB", "#00FF96", "#F58CBA", "#FFFFFF", "#FFF569", "#0070DE", "#8787ED", "#C79C6E")
-)
+ReadClassInfo <- function() {
+    colClasses <- c("factor","factor","character")
+    result <- fread("data/static/class-info.csv",
+                    head=TRUE, sep=";", colClasses=colClasses, key=c("Class"))
+    return(result)
+}
 
-SpecInfo = data.table(
-    Spec = c("BloodDk", "FrostDk", "UnholyDk", "HavocDh", "VengeanceDh", "BalanceDruid", "FeralDruid", "GuardianDruid", "RestorationDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "BrewmasterMonk", "MistweaverMonk", "WindwalkerMonk", "HolyPaladin", "ProtectionPaladin", "RetributionPaladin", "DisciplinePriest", "HolyPriest", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "RestorationShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior", "ProtectionWarrior"),
-    Class = c("DeathKnight", "DeathKnight", "DeathKnight", "DemonHunter", "DemonHunter", "Druid", "Druid", "Druid", "Druid", "Hunter", "Hunter", "Hunter", "Mage", "Mage", "Mage", "Monk", "Monk", "Monk", "Paladin", "Paladin", "Paladin", "Priest", "Priest", "Priest", "Rogue", "Rogue", "Rogue", "Shaman", "Shaman", "Shaman", "Warlock", "Warlock", "Warlock", "Warrior", "Warrior", "Warrior"),
-    Role = c("Tank", "Melee", "Melee", "Melee", "Tank", "Ranged", "Melee", "Tank", "Healer", "Ranged", "Ranged", "Melee", "Ranged", "Ranged", "Ranged", "Tank", "Healer", "Melee", "Healer", "Tank", "Melee", "Healer", "Healer", "Ranged", "Melee", "Melee", "Melee", "Ranged", "Melee", "Healer", "Ranged", "Ranged", "Ranged", "Melee", "Melee", "Tank")
-)
+ReadDungeonInfo <- function() {
+    colClasses <- c("factor","factor","integer")
+    result <- fread("data/static/dungeon-info.csv",
+                    head=TRUE, sep=";", colClasses=colClasses, key=c("Dungeon"))
+    return(result)
+}
+
+ReadAffixInfo <- function() {
+    colClasses <- c("integer","factor","factor", "factor", "factor")
+    result <- fread("data/static/affix-info.csv",
+                    head=TRUE, sep=";", colClasses=colClasses, key=c("PeriodId"))
+    return(result)
+}
+
+SpecInfo <- ReadSpecInfo()
+ClassInfo <- ReadClassInfo()
+DungeonInfo <- ReadDungeonInfo()
+AffixInfo <- ReadAffixInfo()
 
 # For each spec the color of choice
 SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
