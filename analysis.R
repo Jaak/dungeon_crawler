@@ -2,6 +2,7 @@ library(data.table)
 library(ggplot2)
 library(viridis)
 library(scales)
+library(lubridate)
 
 ReadSpecInfo <- function() {
     colClasses <- c("factor","factor","factor")
@@ -42,34 +43,11 @@ TankColorTable <- SpecColorTable[Role == "Tank"]
 TankColors <- TankColorTable$Color
 names(TankColors) <- TankColorTable$Spec
 
-AffixCombinations = data.table(
-    Id = c(1,2,3,4,5,6,7,8,9,10,11,12),
-    Affix1 = factor(rep(c("Fortified", "Tyrannical"), times = 6))
-)
-
 # print(AffixCombinations)
 # exit(1)
 
 SavePlotAsPng <- function(name, plot) {
     ggsave(name, plot = plot, device = png(), height = 4)
-}
-
-# Using column classes for more efficient representation and faster reading.
-# If this is slow for you can skip columns by marking the respective class as "NA".
-ReadCSVFile <- function(fname) {
-
-    colClasses <-
-        c("factor","factor","factor", # Region;Faction;Dungeon;
-          "integer64","integer","integer", # Timestamp;Duration;KeystoneLevel
-          "factor","factor") # Tank;Healer
-
-    # NumFrostDk;NumUnholyDk;NumHavocDh;NumBalanceDruid;NumFeralDruid;NumBeastMasterHunter
-    # NumMarksmanshipHunter;NumSurvivalHunter;NumArcaneMage;NumFireMage;NumFrostMage;NumWindwalkerMonk
-    # NumRetributionPaladin;NumShadowPriest;NumAssassinationRogue;NumOutlawRogue;NumSubtletyRogue;NumElementalShaman
-    # NumEnhancementShaman;NumAfflictionWarlock;NumDemonologyWarlock;NumDestructionWarlock;NumArmsWarrior;HasFuryWarrior
-    colClasses <- c(colClasses, rep("integer", times = 4*6))
-    result <- fread(fname, head=TRUE, sep=";", colClasses=colClasses)
-    return(result)
 }
 
 RunDurationBoxplot <- function(Board) {
@@ -255,32 +233,20 @@ KeystoneLevelHeatmap <- function(Board) {
 }
 
 RunStartTimeDistribution <- function(Board) {
-    Tbl <- Board[,.(Hour=as.POSIXct(round(Datetime, "hour")))]
-    Tbl <- Tbl[, .(Count = .N), keyby=.(Hour)]
-    plot <- ggplot(data=Tbl, aes(x=Hour, y=Count)) +
-        geom_bar(stat = "identity") +
-        scale_x_datetime(breaks = date_breaks("1 day"))
+    Tbl <- Board[, .(Count = .N, Day = floor_date(first(Datetime), "day")), by=.(as.IDate(Datetime))]
+    plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color=wday(Day, label = TRUE))) +
+        geom_point() +
+        xlab("Time") +
+        ylab("Number of runs (in a day)") +
+        labs(color="Day") +
+        scale_x_datetime(breaks = date_breaks("1 month"))
     return (plot)
 }
 
 args <- commandArgs(TRUE)
 
-# Read the leaderboard data
-Board <- ReadCSVFile(args[1])
-
-# Has to be better way to only get uniques and attach group size
-Board <- unique(Board)
-
-# Count number of melee
-Board[,NumMelee:=NumFrostDk+NumUnholyDk+NumHavocDh+NumFeralDruid+NumSurvivalHunter+NumWindwalkerMonk+NumRetributionPaladin+NumAssassinationRogue+NumOutlawRogue+NumSubtletyRogue+NumEnhancementShaman+NumArmsWarrior+NumFuryWarrior]
-
-# More readable duration
-Board[,TimeMinutes:=Duration/60000]
-
-# Attach information if run was successfully on time or not
-Board <- Board[DungeonInfo, on='Dungeon', Success:=TimeMinutes<=TimeLimit]
-
-Board[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01")]
+print("Reading database...")
+Board <- readRDS("db.rds")
 
 #
 # General style
