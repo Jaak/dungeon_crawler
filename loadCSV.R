@@ -62,7 +62,7 @@ Preprocess <- function(Tbl) {
     Tbl[,NumMelee:=NumFrostDk+NumUnholyDk+NumHavocDh+NumFeralDruid+NumSurvivalHunter+NumWindwalkerMonk+NumRetributionPaladin+NumAssassinationRogue+NumOutlawRogue+NumSubtletyRogue+NumEnhancementShaman+NumArmsWarrior+NumFuryWarrior]
     Tbl[,TimeMinutes:=Duration/60000]
     Tbl[DungeonInfo, on='Dungeon', Success:=TimeMinutes<=TimeLimit]
-    Tbl[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01")]
+    Tbl[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01", tz="UTC")]
 
     # Remove few more redundant columns
     Tbl[,Timestamp:=NULL]
@@ -77,9 +77,9 @@ Db <- NULL
 DbFileName <- "db.rds"
 
 # XXX
-### if (file.exists(DbFileName)) {
-###     Db <- readRDS(DbFileName)
-### }
+if (file.exists(DbFileName)) {
+    Db <- readRDS(DbFileName)
+}
 
 for (file in args) {
     print(paste0("Loading file ", file))

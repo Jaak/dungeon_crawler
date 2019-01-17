@@ -26,7 +26,7 @@ ReadDungeonInfo <- function() {
 }
 
 ReadAffixInfo <- function() {
-    colClasses <- c("integer","factor","factor", "factor", "factor")
+    colClasses <- c("integer","factor","factor","factor","factor","numeric")
     result <- fread("data/static/affix-info.csv",
                     head=TRUE, sep=";", colClasses=colClasses, key=c("PeriodId"))
     return(result)
@@ -36,6 +36,8 @@ SpecInfo <- ReadSpecInfo()
 ClassInfo <- ReadClassInfo()
 DungeonInfo <- ReadDungeonInfo()
 AffixInfo <- ReadAffixInfo()
+
+AffixInfo[, IsDifficultWeek := (Affix1 == "Fortified") & (Affix2 == "Sanguine" | Affix2 == "Teeming")]
 
 # For each spec the color of choice
 SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
@@ -232,9 +234,12 @@ KeystoneLevelHeatmap <- function(Board) {
     return (plot)
 }
 
-RunStartTimeDistribution <- function(Board) {
-    Tbl <- Board[, .(Count = .N, Day = floor_date(first(Datetime), "day")), by=.(as.IDate(Datetime))]
-    plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color=wday(Day, label = TRUE))) +
+RunsPerDay <- function(Board) {
+    Tbl <- Board[,
+        .(Count = .N, PeriodId = last(PeriodId), Day = floor_date(first(Datetime), "day")),
+        by=.(d = as.IDate(Datetime))]
+    plot <- ggplot(data=Tbl, aes(x=Day, y=Count,
+                                 color=wday(Day, label = TRUE))) +
         geom_point() +
         xlab("Time") +
         ylab("Number of runs (in a day)") +
@@ -243,10 +248,39 @@ RunStartTimeDistribution <- function(Board) {
     return (plot)
 }
 
-args <- commandArgs(TRUE)
+AvgKeystonePerDay <- function(Board) {
+    Tbl <- Board[
+        Success == TRUE,
+        .(AvgKeystoneLevel = mean(KeystoneLevel),
+          PeriodId = first(PeriodId),
+          Day = floor_date(first(Datetime), "day")),
+        by=.(as.IDate(Datetime))]
+    Tbl <- Tbl[AffixInfo, on = 'PeriodId']
+    Tbl <- Tbl[! is.na(Day)]
+    plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix2)) +
+        geom_point() +
+        xlab("Time") +
+        ylab("Average level of completed keystone") +
+        scale_x_datetime(
+            breaks = date_breaks("1 month"),
+            date_labels = "%b")
+    return (plot)
+}
 
-print("Reading database...")
+#
+# Read DB and print some useful information:
+#
+
+cat("Reading database...\n")
 Board <- readRDS("db.rds")
+cat(paste0("    Loaded ", nrow(Board), " rows\n"))
+cat("Database contains following time periods:\n")
+
+# Summ <- Board[, .(FirstRun = min(Datetime), LastRun = max(Datetime)), by=.(Region, PeriodId)]
+# Summ <- Summ[, data.table(Day = days(0:6)), by=PeriodId]
+# print(Summ)
+# print(nrow(Summ))
+# exit(1)
 
 #
 # General style
@@ -270,44 +304,32 @@ if (FALSE) {
 #
 
 if (TRUE) {
-    SavePlotAsPng("number-of-runs.png", NumberOfRuns(Board))
-}
+    LatestWeek <- Board[PeriodId == max(PeriodId)]
+    FirstTime <- min(LatestWeek$Datetime)
+    LastTime <- max(LatestWeek$Datetime)
+    cat(paste0("Plotting runs from ", FirstTime, " to ", LastTime, "\n"))
 
-if (TRUE) {
-    SavePlotAsPng("tank-precentage.png", TankPrecentage(Board))
-}
+    SavePlotAsPng("number-of-runs.png", NumberOfRuns(LatestWeek))
+    SavePlotAsPng("tank-precentage.png", TankPrecentage(LatestWeek))
+    SavePlotAsPng("healer-precentage.png", HealerPrecentage(LatestWeek))
+    SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(LatestWeek))
+    SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(LatestWeek, 15))
+    SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(LatestWeek))
+    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(LatestWeek))
 
-if (TRUE) {
-    SavePlotAsPng("healer-precentage.png", HealerPrecentage(Board))
-}
-
-if (TRUE) {
-    SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(Board))
-}
-
-if (TRUE) {
-    SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(Board, 15))
-}
-
-if (TRUE) {
-    SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Board))
-}
-
-if (TRUE) {
-    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Board))
-}
-
-#
-# Occasionally interesting plots:
-#
-
-if (TRUE) {
     SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Board, 15))
-}
-
-if (TRUE) {
     SavePlotAsPng("tank-heatmap.png", TankHeatmap(Board, 15))
 }
+
+#
+# Summary data across entire timespan of M+:
+#
+
+if (FALSE) {
+    SavePlotAsPng("timestamp.png", RunsPerDay(Board))
+    SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
+}
+
 
 #
 # A bit boring but still little informative plots:
@@ -315,16 +337,6 @@ if (TRUE) {
 
 if (FALSE) {
     SavePlotAsPng("dungeon-popularity.png", DungeonPopularity(Board))
-}
-
-if (FALSE) {
-    SavePlotAsPng("timestamp.png", RunStartTimeDistribution(Board))
-}
-
-if (FALSE) {
     SavePlotAsPng("tank-success.png", TankSuccessByKey(Board))
-}
-
-if (FALSE) {
     SavePlotAsPng("overall-success-rate.png", SuccessRateBaseOnKeyLevel(Board))
 }
