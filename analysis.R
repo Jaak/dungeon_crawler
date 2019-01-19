@@ -302,6 +302,30 @@ AvgKeystonePerDay <- function(Board) {
     return (plot)
 }
 
+AnimateRunCount <- function(Board) {
+    Summ <- Board[KeystoneLevel <= 18 & PeriodId < max(PeriodId),
+        .(Runs = .N),
+        by=.(KeystoneLevel, Success, PeriodId)]
+
+    plot <- ggplot(data=Summ, aes(x = factor(KeystoneLevel), y = Runs, fill = Success)) +
+        geom_bar(stat="identity") +
+        xlab("Keystone level") +
+        ylab("Number of runs") +
+        guides(fill=FALSE) +
+        labs(title = 'Day: {frame_time}') +
+        coord_cartesian(ylim=c(0,75000)) +
+        transition_time(PeriodId) +
+        ease_aes('linear')
+
+    N <- length(unique(Summ$PeriodId))
+    anim <- animate(plot,
+        device='png',
+        fps = 1, nframes = N,
+        width = 2000, height = 1200, res = 300)
+
+    return (anim)
+}
+
 #
 # Read DB and print some useful information:
 #
@@ -328,31 +352,6 @@ theme_set(theme_bw())
 #
 # Animations:
 #
-
-AnimateRunCount <- function(Board) {
-    Summ <- Board[KeystoneLevel <= 18 & PeriodId < max(PeriodId),
-        .(Runs = .N),
-        by=.(KeystoneLevel, Success, PeriodId)]
-
-    plot <- ggplot(data=Summ, aes(x = factor(KeystoneLevel), y = Runs, fill = Success)) +
-        geom_bar(stat="identity") +
-        xlab("Keystone level") +
-        ylab("Number of runs") +
-        guides(fill=FALSE) +
-        labs(title = 'Day: {frame_time}') +
-        coord_cartesian(ylim=c(0,75000)) +
-        transition_time(PeriodId) +
-        ease_aes('linear')
-
-    N <- length(unique(Summ$PeriodId))
-    anim <- animate(plot,
-        device='png',
-        fps = 1, nframes = N,
-        width = 2000, height = 1200, res = 300)
-
-    return (anim)
-}
-
 
 if (FALSE) {
     library(gganimate)
