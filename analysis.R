@@ -39,11 +39,18 @@ AffixInfo <- ReadAffixInfo()
 
 AffixInfo[, IsDifficultWeek := (Affix1 == "Fortified") & (Affix2 == "Sanguine" | Affix2 == "Teeming")]
 
-# For each spec the color of choice
+# For each spec the color of choice.
 SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
 TankColorTable <- SpecColorTable[Role == "Tank"]
 TankColors <- TankColorTable$Color
 names(TankColors) <- TankColorTable$Spec
+
+# Not using classic white for priests for obvious reasons.
+HealerColorTable <- SpecColorTable[Role == "Healer"]
+HealerColorTable[Spec == "DisciplinePriest", Color := "#A9A9A9"]
+HealerColorTable[Spec == "HolyPriest", Color := "#FFDF00"]
+HealerColors <- HealerColorTable$Color
+names(HealerColors) <- HealerColorTable$Spec
 
 # print(AffixCombinations)
 # exit(1)
@@ -92,16 +99,6 @@ DungeonPopularity <- function(Board) {
     return (plot)
 }
 
-SuccessRateBaseOnKeyLevel <- function(Board) {
-    summary <- Board[, list(SuccessRate = sum(Success) / .N), keyby=.(KeystoneLevel, Dungeon)]
-    plot <- ggplot(data=summary, aes(x = factor(KeystoneLevel), y = SuccessRate, fill=Dungeon)) +
-        geom_bar(stat="identity") +
-        xlab("Keystone level") +
-        ggtitle("Success rate of each dungeon per keystone level")
-
-    return (plot)
-}
-
 TankPrecentage <- function(Board) {
     TankRuns <- Board[Tank != "",.(Count=.N), keyby=.(KeystoneLevel,Tank)]
     TankRuns[, Percent := sum(Count), by=KeystoneLevel]
@@ -130,6 +127,7 @@ HealerPrecentage <- function(Board) {
     KeyRange <- 2:max(HealerRuns$KeystoneLevel)
     plot <- ggplot(data=HealerRuns, aes(x=KeystoneLevel, y=Percent, color=Healer)) +
         geom_line() +
+        scale_color_manual(values = HealerColors) +
         scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
         scale_y_continuous(labels = percent) +
         xlab("Keystone level") +
@@ -248,6 +246,43 @@ RunsPerDay <- function(Board) {
     return (plot)
 }
 
+TankPrecentageOverTime <- function(Board) {
+    Summ <- Board[
+        Tank != "",
+        .(Count=.N, Day = floor_date(first(Datetime), "day")),
+        keyby=.(Tank, d = as.IDate(Datetime))]
+    Summ[, Percent := sum(Count), by=d]
+    Summ[, Percent := Count/Percent]
+    plot <- ggplot(data=Summ,
+        aes(x=Day, y=Percent, color=Tank)) +
+        scale_color_manual(values = TankColors) +
+        geom_line() +
+        scale_x_datetime(breaks = date_breaks("1 month")) +
+        scale_y_continuous(labels = percent) +
+        xlab("Time") +
+        ylab("Percentage of all runs") +
+        ggtitle("Tank popularity over time")
+    return (plot)
+}
+
+HealerPrecentageOverTime <- function(Board) {
+    Summ <- Board[
+        Healer != "",
+        .(Count=.N, Day = floor_date(first(Datetime), "day")),
+        keyby=.(Healer, d = as.IDate(Datetime))]
+    Summ[, Percent:=sum(Count), by=d]
+    Summ[, Percent:=Count/Percent]
+    plot <- ggplot(data=Summ, aes(x=Day, y=Percent, color=Healer)) +
+        geom_line() +
+        scale_color_manual(values = HealerColors) +
+        scale_x_datetime(breaks = date_breaks("1 month")) +
+        scale_y_continuous(labels = percent) +
+        xlab("Time") +
+        ylab("Percentage of all runs") +
+        ggtitle("Healer popularity over time")
+    return (plot)
+}
+
 AvgKeystonePerDay <- function(Board) {
     Tbl <- Board[
         Success == TRUE,
@@ -274,8 +309,10 @@ AvgKeystonePerDay <- function(Board) {
 cat("Reading database...\n")
 Board <- readRDS("db.rds")
 cat(paste0("    Loaded ", nrow(Board), " rows\n"))
-cat("Database contains following time periods:\n")
 
+Board[, WeekNr := PeriodId - min(PeriodId) + 1]
+
+# cat("Database contains following time periods:\n")
 # Summ <- Board[, .(FirstRun = min(Datetime), LastRun = max(Datetime)), by=.(Region, PeriodId)]
 # Summ <- Summ[, data.table(Day = days(0:6)), by=PeriodId]
 # print(Summ)
@@ -289,36 +326,64 @@ cat("Database contains following time periods:\n")
 theme_set(theme_bw())
 
 #
-# Plotly test:
+# Animations:
 #
 
+AnimateRunCount <- function(Board) {
+    Summ <- Board[KeystoneLevel <= 18 & PeriodId < max(PeriodId),
+        .(Runs = .N),
+        by=.(KeystoneLevel, Success, PeriodId)]
+
+    plot <- ggplot(data=Summ, aes(x = factor(KeystoneLevel), y = Runs, fill = Success)) +
+        geom_bar(stat="identity") +
+        xlab("Keystone level") +
+        ylab("Number of runs") +
+        guides(fill=FALSE) +
+        labs(title = 'Day: {frame_time}') +
+        coord_cartesian(ylim=c(0,75000)) +
+        transition_time(PeriodId) +
+        ease_aes('linear')
+
+    N <- length(unique(Summ$PeriodId))
+    anim <- animate(plot,
+        device='png',
+        fps = 1, nframes = N,
+        width = 2000, height = 1200, res = 300)
+
+    return (anim)
+}
+
+
 if (FALSE) {
-    library(plotly)
-    p <- SuccessRateByDungeonA(Board)
-    p <- ggplotly(p)
-    htmlwidgets::saveWidget(as_widget(p), "graph.html")
+    library(gganimate)
+
+    anim_save(AnimateRunCount(Board), file = 'runs-animation.gif')
 }
 
 #
 # Bunch of graphs:
 #
 
-if (TRUE) {
-    LatestWeek <- Board[PeriodId == max(PeriodId)]
-    FirstTime <- min(LatestWeek$Datetime)
-    LastTime <- max(LatestWeek$Datetime)
-    cat(paste0("Plotting runs from ", FirstTime, " to ", LastTime, "\n"))
+if (FALSE) {
+    Week <- Board[WeekNr == 7]
+    FirstTime <- min(Week$Datetime)
+    LastTime <- max(Week$Datetime)
+    cat("Plotting statistics of a week.\n")
+    cat(paste0("   First run ", FirstTime, "\n"))
+    cat(paste0("   Last run  ", LastTime, "\n"))
 
-    SavePlotAsPng("number-of-runs.png", NumberOfRuns(LatestWeek))
-    SavePlotAsPng("tank-precentage.png", TankPrecentage(LatestWeek))
-    SavePlotAsPng("healer-precentage.png", HealerPrecentage(LatestWeek))
-    SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(LatestWeek))
-    SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(LatestWeek, 15))
-    SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(LatestWeek))
-    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(LatestWeek))
+    SavePlotAsPng("number-of-runs.png", NumberOfRuns(Week))
+    SavePlotAsPng("tank-precentage.png", TankPrecentage(Week))
+    SavePlotAsPng("healer-precentage.png", HealerPrecentage(Week))
+    SavePlotAsPng("melee-precentage.png", MeleeCountPrecentage(Week))
+    SavePlotAsPng("success-by-dungeon-15.png", SuccessRateByDungeon(Week, 15))
+    SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
+    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week))
 
-    SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Board, 15))
-    SavePlotAsPng("tank-heatmap.png", TankHeatmap(Board, 15))
+    # SavePlotAsPng("healer-heatmap.png", HealerHeatmap(Week, 15))
+    # SavePlotAsPng("tank-heatmap.png", TankHeatmap(Week, 15))
+    # SavePlotAsPng("dungeon-popularity.png", DungeonPopularity(Week))
+    # SavePlotAsPng("tank-success.png", TankSuccessByKey(Week))
 }
 
 #
@@ -326,17 +391,9 @@ if (TRUE) {
 #
 
 if (FALSE) {
+    cat("Plotting statistics of entire time period.\n")
+    SavePlotAsPng("healers-season.png", HealerPrecentageOverTime(Board))
+    SavePlotAsPng("tanks-season.png", TankPrecentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
-}
-
-
-#
-# A bit boring but still little informative plots:
-#
-
-if (FALSE) {
-    SavePlotAsPng("dungeon-popularity.png", DungeonPopularity(Board))
-    SavePlotAsPng("tank-success.png", TankSuccessByKey(Board))
-    SavePlotAsPng("overall-success-rate.png", SuccessRateBaseOnKeyLevel(Board))
 }
