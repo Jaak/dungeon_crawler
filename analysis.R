@@ -235,7 +235,7 @@ KeystoneLevelHeatmap <- function(Board) {
 RunsPerDay <- function(Board) {
     Tbl <- Board[,
         .(Count = .N, PeriodId = last(PeriodId), Day = floor_date(first(Datetime), "day")),
-        by=.(d = as.IDate(Datetime))]
+        by=.(DayNr)]
     plot <- ggplot(data=Tbl, aes(x=Day, y=Count,
                                  color=wday(Day, label = TRUE))) +
         geom_point() +
@@ -250,8 +250,8 @@ TankPrecentageOverTime <- function(Board) {
     Summ <- Board[
         Tank != "",
         .(Count=.N, Day = floor_date(first(Datetime), "day")),
-        keyby=.(Tank, d = as.IDate(Datetime))]
-    Summ[, Percent := sum(Count), by=d]
+        keyby=.(Tank, DayNr)]
+    Summ[, Percent := sum(Count), by=DayNr]
     Summ[, Percent := Count/Percent]
     plot <- ggplot(data=Summ,
         aes(x=Day, y=Percent, color=Tank)) +
@@ -269,8 +269,8 @@ HealerPrecentageOverTime <- function(Board) {
     Summ <- Board[
         Healer != "",
         .(Count=.N, Day = floor_date(first(Datetime), "day")),
-        keyby=.(Healer, d = as.IDate(Datetime))]
-    Summ[, Percent:=sum(Count), by=d]
+        keyby=.(Healer, DayNr)]
+    Summ[, Percent:=sum(Count), by=DayNr]
     Summ[, Percent:=Count/Percent]
     plot <- ggplot(data=Summ, aes(x=Day, y=Percent, color=Healer)) +
         geom_line() +
@@ -289,10 +289,10 @@ AvgKeystonePerDay <- function(Board) {
         .(AvgKeystoneLevel = mean(KeystoneLevel),
           PeriodId = first(PeriodId),
           Day = floor_date(first(Datetime), "day")),
-        by=.(as.IDate(Datetime))]
+        by=.(DayNr)]
     Tbl <- Tbl[AffixInfo, on = 'PeriodId']
     Tbl <- Tbl[! is.na(Day)]
-    plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix2)) +
+    plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix3, shape=Affix2)) +
         geom_point() +
         xlab("Time") +
         ylab("Average level of completed keystone") +
@@ -334,17 +334,38 @@ cat("Reading database...\n")
 Board <- readRDS("db.rds")
 cat(paste0("    Loaded ", nrow(Board), " rows\n"))
 
-Board[, WeekNr := PeriodId - min(PeriodId) + 1]
-
-# cat("Database contains following time periods:\n")
-# Summ <- Board[, .(FirstRun = min(Datetime), LastRun = max(Datetime)), by=.(Region, PeriodId)]
-# Summ <- Summ[, data.table(Day = days(0:6)), by=PeriodId]
-# print(Summ)
-# print(nrow(Summ))
-# exit(1)
+DayIndex <- Board[, .(Day = min(Datetime), Dummy = 1), by=.(Region, PeriodId)]
+Offsets <- data.table(
+    Offset = days(0 : 6),
+    DayNr = c(1 : 7),
+    Dummy = c(1,1,1,1,1,1,1)
+)
 
 #
-# General style
+# Split data into days in a more sensible way:
+#
+
+DayIndex <- Offsets[DayIndex, on = 'Dummy', mult = 'all', allow.cartesian=TRUE]
+DayIndex[, Dummy := NULL]
+DayIndex[, DayBegin := Day + Offset]
+DayIndex[, DayEnd := DayBegin + days(1)]
+DayIndex[, Offset := NULL]
+DayIndex[, Day := NULL]
+setkeyv(DayIndex, c("Region", "PeriodId", "DayBegin", "DayEnd"))
+
+cat("    Attaching day numbers...\n")
+Board[, Datetime2 := Datetime]
+Board <- foverlaps(Board, DayIndex,
+    by.x = c("Region", "PeriodId", "Datetime", "Datetime2"),
+    by.y = c("Region", "PeriodId", "DayBegin", "DayEnd"),
+    type = "within",
+    mult = "first")
+Board[, Datetime2 := NULL]
+Board[, WeekNr := PeriodId - min(PeriodId) + 1]
+Board[, DayNr := DayNr + 7*(WeekNr - 1)]
+
+#
+# General style:
 #
 
 theme_set(theme_bw())
@@ -391,6 +412,9 @@ if (FALSE) {
 
 if (FALSE) {
     cat("Plotting statistics of entire time period.\n")
+    cat(paste0("   First run ", min(Board$Datetime), "\n"))
+    cat(paste0("   Last run  ", max(Board$Datetime), "\n"))
+
     SavePlotAsPng("healers-season.png", HealerPrecentageOverTime(Board))
     SavePlotAsPng("tanks-season.png", TankPrecentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
