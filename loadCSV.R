@@ -87,7 +87,7 @@ for (file in args) {
     Tbl <- Preprocess(Tbl)
 
     if (is.null(Db)) {
-        Db <- Tbl
+        Db <- unique(Tbl)
     }
     else {
         Db <- funion(Db, Tbl)
