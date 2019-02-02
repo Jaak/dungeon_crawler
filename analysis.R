@@ -38,8 +38,6 @@ ClassInfo <- ReadClassInfo()
 DungeonInfo <- ReadDungeonInfo()
 AffixInfo <- ReadAffixInfo()
 
-AffixInfo[, IsDifficultWeek := (Affix1 == "Fortified") & (Affix2 == "Sanguine" | Affix2 == "Teeming")]
-
 #
 SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
 SpecColors <- SpecColorTable$Color

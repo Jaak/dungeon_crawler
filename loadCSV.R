@@ -82,7 +82,7 @@ if (file.exists(DbFileName)) {
 }
 
 for (file in args) {
-    print(paste0("Loading file ", file))
+    cat(paste0("Loading file ", file, "\n"))
     Tbl <- ReadCSVFile(file)
     Tbl <- Preprocess(Tbl)
 
