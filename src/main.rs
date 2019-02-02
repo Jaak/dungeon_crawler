@@ -16,9 +16,10 @@ extern crate crossbeam;
 extern crate dotenv;
 #[macro_use]
 extern crate crossbeam_channel;
+extern crate structopt;
 
 use chrono::prelude::*;
-use crossbeam_channel::{bounded, tick};
+use crossbeam_channel::{bounded, tick, TrySendError};
 use curl::easy::{Easy, List};
 use dotenv::dotenv;
 use log::{error, info, warn};
@@ -27,6 +28,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::{env, error, process, str, thread, time, path, fs};
+use structopt::StructOpt;
 
 struct Ctx {
     access_token: String,
@@ -83,6 +85,20 @@ impl Region {
             Region::Us => "us",
             Region::Kr => "apac",
             Region::Tw => "apac",
+        }
+    }
+}
+
+impl FromStr for Region {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_ref() {
+            "eu" => Ok(Region::Eu),
+            "us" => Ok(Region::Us),
+            "kr" => Ok(Region::Kr),
+            "tw" => Ok(Region::Tw),
+            _ => Err("Invalid region. Either eu, us, kr or tw.")?
         }
     }
 }
@@ -363,7 +379,7 @@ mod json {
 
     #[derive(Deserialize, Debug)]
     pub struct PeriodId {
-        pub id: u32,
+        pub id: u32
     }
 
     #[derive(Deserialize, Debug)]
@@ -566,27 +582,40 @@ fn main() {
     }
 }
 
+#[derive(Debug, StructOpt)]
+#[structopt(
+    name = "dungeon-crawler",
+    about = "Download World of Warcraft mythic+ leaderboard data",
+    version = "0.2.0",
+    author = "Jaak Randmets <jaak.ra@gmail.com>",
+    rename_all = "kebab-case")]
+struct Cfg {
+    #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw or kr.")]
+    region: Region,
+    #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
+    workers: usize,
+    #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
+    rate: f32,
+    #[structopt(long, help="Time period ID. Use latest time period as default.")]
+    period: Option<u32>,
+    #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
+    output: Option<path::PathBuf>,
+    #[structopt(long, help="Print information about latest period ID.")]
+    show_latest_period: bool,
+}
+
 fn run() -> Result<()> {
     env_logger::init();
     dotenv().ok();
 
     let client_id = env::var("CLIENT_ID")?;
     let client_secret = env::var("CLIENT_SECRET")?;
-    let region = Region::Eu;
-    let num_workers = 10;
-    let sleep_dur = time::Duration::from_millis(10);
-    let period_id = 661; // TODO: hard coded, think something better out
-
-    // 662 -- 2018-09-05
-    // 663 -- 2018-09-12
-    // 664 -- 2018-09-19
-    // 665 -- 2018-09-26
-    // 666 -- 2018-10-03
-    // 667 -- 2018-10-10
-    // 668 -- 2018-10-17
-    // 669 -- 2018-10-24
-    // ...
-    // 680 -- 2019-01-09
+    let cfg = Cfg::from_args();
+    let region = cfg.region;
+    let num_workers = cfg.workers;
+    let rate = cfg.rate;
+    let period = cfg.period;
+    let output = cfg.output;
 
     info!("Requesting token...");
     let mut easy = Easy::new();
@@ -599,28 +628,49 @@ fn run() -> Result<()> {
         easy: RefCell::new(easy),
     };
 
-    info!("Querying period info (period_id = {})", period_id);
-    let period = query_period(gctx, period_id)?;
-    let dt = Utc.timestamp_millis(period.start_timestamp as i64);
-    let csv_file_name = format!(
-        "{}-leaderboard-{}.csv",
-        dt.format("%Y-%m-%d"),
-        region.query_str()
-    );
+    let period_id = match period {
+        None => query_period_index(gctx)?.current_period.id,
+        Some(id) => id,
+    };
 
-    let path = path::Path::new(&csv_file_name);
+    // TODO: weirdness with this option
+    if cfg.show_latest_period {
+        let vec = query_period_index(gctx)?.periods;
+        if let Some(index) = vec.last() {
+            let period = query_period(gctx, index.id)?;
+            println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
+        }
+
+        process::exit(0);
+    }
+
+    info!("Querying period info (period_id = {})", period_id);
+    let period_info = query_period(gctx, period_id)?;
+    let path = match output {
+        Some(path) => path,
+        None => {
+            let dt = Utc.timestamp_millis(period_info.start_timestamp as i64);
+            let csv_file_name = format!(
+                "{}-leaderboard-{}.csv",
+                dt.format("%Y-%m-%d"),
+                region.query_str()
+            );
+
+            path::PathBuf::from(csv_file_name)
+        }
+    };
+
     let exists = path.exists();
-    let create = ! exists;
     if exists &&  ! path.is_file() {
-        error!("Existing \'{:?}\' is not a file.", path);
+        error!("\'{}\' is not a file.", path.display());
         process::exit(1);
     }
 
-    if exists {
-        info!("Path already exists, appending data!");
-    }
+    info!("{} leaderboard to {}",
+        if exists { "Appending" } else { "Writing" },
+        path.display());
 
-    info!("Writing leaderboard to {}", csv_file_name);
+    let create = ! exists;
     let file = fs::OpenOptions::new()
         .append(true).write(true).create(create).open(&path)?;
 
@@ -634,9 +684,6 @@ fn run() -> Result<()> {
 
         // Worker threads send CSV rows to CSV writer thread:
         let (rows_s, rows_r) = bounded(num_workers);
-
-        // Ticker to flush the CSV file every second:
-        let ticker = tick(time::Duration::from_secs(1));
 
         // Spawn worker threads
         for _ in 1..num_workers {
@@ -677,6 +724,9 @@ fn run() -> Result<()> {
             guards.push(guard);
         }
 
+        // Ticker to flush the CSV file every second:
+        let ticker = tick(time::Duration::from_secs(1));
+
         // Spawn thread for writing CSV file
         let guard = thread::spawn(move || -> Result<()> {
             loop {
@@ -697,6 +747,7 @@ fn run() -> Result<()> {
         info!("Gathering connected realm ID-s...");
         let realms = query_connected_realms(gctx)?;
         let inst = time::Instant::now();
+        let sleep_dur = time::Duration::from_millis((1000f32/rate) as _);
         let mut queries_sent = 0;
         for connected_realm in realms {
             let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
@@ -704,11 +755,20 @@ fn run() -> Result<()> {
                 let q = GetMythicLeaderboard {
                     connected_realm_id: connected_realm,
                     dungeon_id: index.dungeon_id,
-                    period: period.id,
+                    period: period_id,
                 };
 
-                queries_s.send(q)?;
-                thread::sleep(sleep_dur);
+                // TODO: think about the rate limiting algorithm little bit more
+                loop {
+                    thread::sleep(sleep_dur);
+                    match queries_s.try_send(q) {
+                        Err(TrySendError::Full(_)) => continue,
+                        Err(TrySendError::Disconnected(_)) =>
+                            Err("Unexpected disconnect of a send-channel (queries_s).")?,
+                        Ok(()) => break,
+                    }
+                };
+
                 queries_sent += 1;
             }
         }

@@ -1,6 +1,6 @@
 [package]
 name = "dungeon-crawler"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jaak Randmets <jaak.ra@gmail.com>"]
 edition = "2018"
 
@@ -17,5 +17,6 @@ regex = "1.1"
 csv = "1.0"
 dotenv = "0.13"
 chrono = "0.4"
-crossbeam = "0.6"
+crossbeam = "0.7"
 crossbeam-channel = "0.3"
+structopt = "0.2"
