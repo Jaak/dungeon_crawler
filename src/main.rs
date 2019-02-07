@@ -76,26 +76,41 @@ enum Region {
     Eu = 1,
     Us,
     Kr,
-    Tw
+    Tw,
+    Cn
 }
 
 impl Region {
-    pub fn query_str(&self) -> &'static str {
+    pub fn gateway_uri(self) -> &'static str {
+        match self {
+            Region::Eu => "https://eu.api.blizzard.com/",
+            Region::Us => "https://us.api.blizzard.com/",
+            Region::Kr => "https://kr.api.blizzard.com/",
+            Region::Tw => "https://tw.api.blizzard.com/",
+            Region::Cn => "https://gateway.battlenet.com.cn/",
+        }
+    }
+
+    pub fn token_uri(self) -> &'static str {
+        match self {
+            Region::Eu => "https://eu.battle.net/oauth/token",
+            Region::Us => "https://us.battle.net/oauth/token",
+            Region::Kr => "https://apac.battle.net/oauth/token",
+            Region::Tw => "https://apac.battle.net/oauth/token",
+            Region::Cn => "https://www.battlenet.com.cn/oauth/token",
+        }
+    }
+}
+
+impl ToString for Region {
+    fn to_string(&self) -> String {
         match self {
             Region::Eu => "eu",
             Region::Us => "us",
             Region::Kr => "kr",
             Region::Tw => "tw",
-        }
-    }
-
-    pub fn token_str(&self) -> &'static str {
-        match self {
-            Region::Eu => "eu",
-            Region::Us => "us",
-            Region::Kr => "apac",
-            Region::Tw => "apac",
-        }
+            Region::Cn => "cn",
+        }.to_string()
     }
 }
 
@@ -108,7 +123,8 @@ impl FromStr for Region {
             "us" => Ok(Region::Us),
             "kr" => Ok(Region::Kr),
             "tw" => Ok(Region::Tw),
-            _ => Err("Invalid region. Either eu, us, kr or tw.")?
+            "cn" => Ok(Region::Cn),
+            _ => Err("Invalid region. Either eu, us, kr, tw or cn.")?
         }
     }
 }
@@ -247,7 +263,7 @@ impl DataRow {
         return true;
     }
 
-    fn update_faction(&mut self, faction_name: &String) {
+    fn update_faction(&mut self, faction_name: &str) {
         match faction_name.to_uppercase().as_str() {
             "ALLIANCE" => { self.faction.replace(Faction::ALLIANCE); },
             "HORDE" => { self.faction.replace(Faction::HORDE); },
@@ -301,6 +317,8 @@ impl DataRow {
     }
 }
 
+// structures we expect to receive from server
+// data is sent in json so using serde_json to parse
 mod json {
     #[derive(Deserialize, Debug)]
     pub struct AccessToken {
@@ -406,46 +424,11 @@ mod json {
     }
 }
 
-trait Queryable {
-    fn make_query_string(&self) -> String;
-}
-
-struct GetConnectedRealmIndex {}
-
-impl Queryable for GetConnectedRealmIndex {
-    fn make_query_string(&self) -> String {
-        String::from("data/wow/connected-realm/index")
-    }
-}
-
-struct GetMythicLeaderboardIndex {
-    connected_realm_id: u32,
-}
-
-impl Queryable for GetMythicLeaderboardIndex {
-    fn make_query_string(&self) -> String {
-        format!(
-            "data/wow/connected-realm/{connectedRealmId}/mythic-leaderboard/index",
-            connectedRealmId = self.connected_realm_id
-        )
-    }
-}
-
 #[derive(Copy, Clone)]
 struct GetMythicLeaderboard {
     connected_realm_id: u32,
     dungeon_id: u32,
     period: u32,
-}
-
-impl Queryable for GetMythicLeaderboard {
-    fn make_query_string(&self) -> String {
-        format!("data/wow/connected-realm/{connectedRealmId}/mythic-leaderboard/{dungeonId}/period/{period}",
-            connectedRealmId = self.connected_realm_id,
-            dungeonId = self.dungeon_id,
-            period = self.period
-        )
-    }
 }
 
 fn write_to_vector(easy: &mut Easy) -> Result<Vec<u8>> {
@@ -463,21 +446,22 @@ fn write_to_vector(easy: &mut Easy) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-fn query<T>(ctx: &Ctx, query: String) -> Result<T>
+fn query<T>(ctx: &Ctx, query: &str) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
     let mut easy = ctx.easy.borrow_mut();
-    let query_str = format!(
-        "https://{region}.api.blizzard.com/{query}?namespace=dynamic-{region}&locale=en_US",
-        region = ctx.region.query_str(),
+    let query_str = &format!(
+        "{gateway}/{query}?namespace=dynamic-{region}&locale=en_US",
+        gateway = ctx.region.gateway_uri(),
+        region = ctx.region.to_string(),
         query = query
     );
-    easy.url(query_str.as_str())?;
+    easy.url(query_str)?;
 
     let mut list = List::new();
-    let header_str = format!("Authorization: Bearer {token}", token = ctx.access_token);
-    list.append(header_str.as_str())?;
+    let header_str = &format!("Authorization: Bearer {token}", token = ctx.access_token);
+    list.append(header_str)?;
     easy.http_headers(list)?;
 
     let data = write_to_vector(&mut easy)?;
@@ -495,16 +479,17 @@ where
 fn token_request(
     easy: &mut Easy,
     region: Region,
-    client_id: String,
-    client_secret: String,
+    client_id: &str,
+    client_secret: &str,
 ) -> Result<json::AccessToken> {
-    let url = format!("https://{region}.battle.net/oauth/token?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
-        region=region.token_str(),
+    let url = &format!(
+        "{uri}?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
+        uri=region.token_uri(),
         client_id=client_id,
         client_secret=client_secret
     );
 
-    easy.url(url.as_str()).unwrap();
+    easy.url(url).unwrap();
 
     let mut list = List::new();
     list.append("Accept: application/json").unwrap();
@@ -522,13 +507,12 @@ fn query_connected_realms(ctx: &Ctx) -> Result<Vec<u32>> {
     }
 
     let realm_index: json::ConnectedRealmIndex =
-        query(ctx, GetConnectedRealmIndex {}.make_query_string())?;
+        query(ctx, "data/wow/connected-realm/index")?;
     let mut result = Vec::new();
     for href in realm_index.connected_realms {
-        for c in MATCH_REALM.captures_iter(href.href.as_str()) {
-            match c.name("connectedRealmId") {
-                Some(val) => result.push(val.as_str().parse()?),
-                None => {}
+        for c in MATCH_REALM.captures_iter(&href.href) {
+            if let Some(val) = c.name("connectedRealmId") {
+                result.push(val.as_str().parse()?);
             }
         }
     }
@@ -549,16 +533,16 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
             Regex::new(r"/mythic-leaderboard/(?P<dungeonId>\d+)/period/(?P<period>\d+)").unwrap();
     }
 
-    let query_obj = GetMythicLeaderboardIndex {
-        connected_realm_id: realm_id,
-    };
-    let leaderboard: json::LeaderboardIndex = query(ctx, query_obj.make_query_string())?;
+    let query_str = &format!(
+        "data/wow/connected-realm/{connectedRealmId}/mythic-leaderboard/index",
+        connectedRealmId = realm_id);
+    let leaderboard: json::LeaderboardIndex = query(ctx, query_str)?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
         let url = entry.key.href;
-        let dungeon_name = Dungeon::from_str(entry.name.as_str())?;
+        let dungeon_name = Dungeon::from_str(&entry.name)?;
         let dungeon_id = entry.id;
-        for c in MATCH_URL.captures_iter(url.as_str()) {
+        for c in MATCH_URL.captures_iter(&url) {
             let dungeon_id2 = c.name("dungeonId").unwrap().as_str().parse::<u32>()?;
             assert_eq!(dungeon_id, dungeon_id2);
             let period = c.name("period").unwrap().as_str().parse()?;
@@ -574,25 +558,41 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
 }
 
 fn query_mythic_leaderboard(ctx: &Ctx, q: &GetMythicLeaderboard) -> Result<json::Leaderboard> {
-    query(ctx, q.make_query_string())
+    let query_str = &format!(
+        "data/wow/connected-realm/{connectedRealmId}/mythic-leaderboard/{dungeonId}/period/{period}",
+        connectedRealmId = q.connected_realm_id,
+        dungeonId = q.dungeon_id,
+        period = q.period);
+    query(ctx, query_str)
 }
 
 fn query_period_index(ctx: &Ctx) -> Result<json::PeriodIndex> {
-    query(ctx, String::from("data/wow/mythic-keystone/period/index"))
+    let query_str = "data/wow/mythic-keystone/period/index";
+    query(ctx, query_str)
 }
 
 fn query_period(ctx: &Ctx, id: u32) -> Result<json::Period> {
-    query(ctx, format!("data/wow/mythic-keystone/period/{}", id))
+    let query_str = &format!("data/wow/mythic-keystone/period/{}", id);
+    query(ctx, query_str)
 }
 
-fn main() {
-    if let Err(err) = run() {
-        println!("{}", err);
-        process::exit(1);
-    }
+#[derive(StructOpt)]
+struct DownloadCmd {
+    #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
+    region: Region,
+    #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
+    workers: usize,
+    #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
+    rate: f32,
+    #[structopt(long, help="Time period ID. Use latest time period as default.")]
+    period: Option<u32>,
+    #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
+    output: Option<path::PathBuf>,
+    #[structopt(long, help="Print information about latest period ID.")]
+    show_latest_period: bool,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(StructOpt)]
 #[structopt(
     name = "dungeon-crawler",
     about = "Download World of Warcraft mythic+ leaderboard data",
@@ -601,24 +601,11 @@ fn main() {
     rename_all = "kebab-case")]
 enum Cfg {
     #[structopt(name = "download")]
-    Download {
-        #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw or kr.")]
-        region: Region,
-        #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
-        workers: usize,
-        #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
-        rate: f32,
-        #[structopt(long, help="Time period ID. Use latest time period as default.")]
-        period: Option<u32>,
-        #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
-        output: Option<path::PathBuf>,
-        #[structopt(long, help="Print information about latest period ID.")]
-        show_latest_period: bool,
-    },
+    Download(DownloadCmd),
     #[structopt(name = "dedup")]
     Dedup {
         #[structopt(help="CSV files to deduplicate.", parse(from_os_str))]
-        files: Vec<path::PathBuf>,
+        paths: Vec<path::PathBuf>,
     }
 }
 
@@ -662,205 +649,217 @@ fn dedup_rows(path: path::PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn run() -> Result<()> {
-    env_logger::init();
-    dotenv().ok();
+fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
+    crossbeam::scope(|scope| {
+        for path in paths {
+            if ! path.is_file() {
+                error!("ERROR: '{}' is not a file. Skipping.", path.display());
+                continue;
+            }
 
-    let client_id = env::var("CLIENT_ID")?;
-    let client_secret = env::var("CLIENT_SECRET")?;
-    let cfg = Cfg::from_args();
+            scope.spawn(move |_| {
+                if let Err(err) = dedup_rows(path) {
+                    error!("ERROR: {}", err);
+                }
+            });
+        };
+    }).unwrap();
 
-    if let Cfg::Dedup{files} = cfg {
-        crossbeam::scope(|scope| {
-            for file in files {
-                if ! file.is_file() {
-                    error!("ERROR: '{}' is not a file. Skipping.", file.display());
-                    continue;
+    Ok(())
+}
+
+fn run_download(cmd: DownloadCmd) -> Result<()> {
+    let client_id = &env::var("CLIENT_ID")?;
+    let client_secret = &env::var("CLIENT_SECRET")?;
+
+    info!("Requesting token...");
+    let mut easy = Easy::new();
+    let DownloadCmd{region, workers, rate, period, output, show_latest_period} = cmd;
+    let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
+
+    // Global context
+    let gctx = &Ctx {
+        access_token: access_token.access_token.clone(),
+        region: region,
+        easy: RefCell::new(easy),
+    };
+
+    let period_id = match period {
+        None => query_period_index(gctx)?.current_period.id,
+        Some(id) => id,
+    };
+
+    // TODO: weirdness with this option
+    if show_latest_period {
+        let vec = query_period_index(gctx)?.periods;
+        if let Some(index) = vec.last() {
+            let period = query_period(gctx, index.id)?;
+            println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
+        }
+
+        process::exit(0);
+    }
+
+    info!("Querying period info (period_id = {})", period_id);
+    let period_info = query_period(gctx, period_id)?;
+    let path = match output {
+        Some(path) => path,
+        None => {
+            let dt = Utc.timestamp_millis(period_info.start_timestamp as i64);
+            let csv_file_name = format!(
+                "{}-leaderboard-{}.csv",
+                dt.format("%Y-%m-%d"),
+                region.to_string()
+            );
+
+            path::PathBuf::from(csv_file_name)
+        }
+    };
+
+    let exists = path.exists();
+    if exists &&  ! path.is_file() {
+        error!("\'{}\' is not a file.", path.display());
+        process::exit(1);
+    }
+
+    info!("{} leaderboard to {}",
+        if exists { "Appending" } else { "Writing" },
+        path.display());
+
+    let create = ! exists;
+    let file = fs::OpenOptions::new()
+        .append(true).write(true).create(create).open(&path)?;
+
+    let mut wrt = csv::WriterBuilder::new()
+        .delimiter(b';').has_headers(create).from_writer(file);
+
+    let mut guards = Vec::new();
+    {
+        // Main thread sends queries to worker threads:
+        let (queries_s, queries_r) = bounded(workers);
+
+        // Worker threads send CSV rows to CSV writer thread:
+        let (rows_s, rows_r) = bounded(workers);
+
+        // Spawn worker threads
+        for _ in 1..workers {
+            let mut easy = Easy::new();
+            easy.accept_encoding("gzip")?;
+
+            let ctx = Ctx {
+                access_token: access_token.access_token.clone(),
+                region: region,
+                easy: RefCell::new(easy),
+            };
+
+            let rows_s = rows_s.clone();
+            let handle_query = move |q| -> Result<()> {
+                let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
+                let dungeon = Dungeon::from_str(&leaderboard.map.name)?;
+                if let Some(leading_groups) = leaderboard.leading_groups {
+                    for leading_group in leading_groups {
+                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                    }
                 }
 
-                scope.spawn(move |_| {
-                    if let Err(err) = dedup_rows(file) {
-                        error!("ERROR: {}", err);
-                    }
-                });
+                Ok(())
             };
-        }).unwrap();
-    }
-    else
-    if let Cfg::Download{region, workers, rate, period, output, show_latest_period} = cfg {
 
-        info!("Requesting token...");
-        let mut easy = Easy::new();
-        let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
-
-        // Global context
-        let gctx = &Ctx {
-            access_token: access_token.access_token.clone(),
-            region: region,
-            easy: RefCell::new(easy),
-        };
-
-        let period_id = match period {
-            None => query_period_index(gctx)?.current_period.id,
-            Some(id) => id,
-        };
-
-        // TODO: weirdness with this option
-        if show_latest_period {
-            let vec = query_period_index(gctx)?.periods;
-            if let Some(index) = vec.last() {
-                let period = query_period(gctx, index.id)?;
-                println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
-            }
-
-            process::exit(0);
-        }
-
-        info!("Querying period info (period_id = {})", period_id);
-        let period_info = query_period(gctx, period_id)?;
-        let path = match output {
-            Some(path) => path,
-            None => {
-                let dt = Utc.timestamp_millis(period_info.start_timestamp as i64);
-                let csv_file_name = format!(
-                    "{}-leaderboard-{}.csv",
-                    dt.format("%Y-%m-%d"),
-                    region.query_str()
-                );
-
-                path::PathBuf::from(csv_file_name)
-            }
-        };
-
-        let exists = path.exists();
-        if exists &&  ! path.is_file() {
-            error!("\'{}\' is not a file.", path.display());
-            process::exit(1);
-        }
-
-        info!("{} leaderboard to {}",
-            if exists { "Appending" } else { "Writing" },
-            path.display());
-
-        let create = ! exists;
-        let file = fs::OpenOptions::new()
-            .append(true).write(true).create(create).open(&path)?;
-
-        let mut wrt = csv::WriterBuilder::new()
-            .delimiter(b';').has_headers(create).from_writer(file);
-
-        let mut guards = Vec::new();
-        {
-            // Main thread sends queries to worker threads:
-            let (queries_s, queries_r) = bounded(workers);
-
-            // Worker threads send CSV rows to CSV writer thread:
-            let (rows_s, rows_r) = bounded(workers);
-
-            // Spawn worker threads
-            for _ in 1..workers {
-                let mut easy = Easy::new();
-                easy.accept_encoding("gzip")?;
-
-                let ctx = Ctx {
-                    access_token: access_token.access_token.clone(),
-                    region: region,
-                    easy: RefCell::new(easy),
-                };
-
-                let rows_s = rows_s.clone();
-                let handle_query = move |q| -> Result<()> {
-                    let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
-                    let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-                    if let Some(leading_groups) = leaderboard.leading_groups {
-                        for leading_group in leading_groups {
-                            rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
-                        }
-                    }
-
-                    Ok(())
-                };
-
-                let queries_r = queries_r.clone();
-                let guard = thread::spawn(move || -> Result<()> {
-                    loop {
-                        match queries_r.recv() {
-                            Ok(q) => { handle_query(q)?; }
-                            Err(_) => { break; }
-                        }
-                    }
-
-                    Ok(())
-                });
-
-                guards.push(guard);
-            }
-
-            // Ticker to flush the CSV file every second:
-            let ticker = tick(time::Duration::from_secs(1));
-
-            // Spawn thread for writing CSV file
+            let queries_r = queries_r.clone();
             let guard = thread::spawn(move || -> Result<()> {
-                loop {
-                    select! {
-                        recv(ticker) -> _ => { wrt.flush()?; },
-                        recv(rows_r) -> row => match row {
-                            Ok(row) => { wrt.serialize(row)?; },
-                            Err(_) => { break; },
-                        },
-                    }
-                };
+                while let Ok(q) = queries_r.recv() {
+                    handle_query(q)?;
+                }
 
                 Ok(())
             });
 
             guards.push(guard);
-
-            info!("Gathering connected realm ID-s...");
-            let realms = query_connected_realms(gctx)?;
-            let inst = time::Instant::now();
-            let sleep_dur = time::Duration::from_millis((1000f32/rate) as _);
-            let mut queries_sent = 0;
-            for connected_realm in realms {
-                let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
-                for index in realm_leaderboard_index {
-                    let q = GetMythicLeaderboard {
-                        connected_realm_id: connected_realm,
-                        dungeon_id: index.dungeon_id,
-                        period: period_id,
-                    };
-
-                    // TODO: think about the rate limiting algorithm little bit more
-                    loop {
-                        thread::sleep(sleep_dur);
-                        match queries_s.try_send(q) {
-                            Err(TrySendError::Full(_)) => continue,
-                            Err(TrySendError::Disconnected(_)) =>
-                                Err("Unexpected disconnect of a send-channel (queries_s).")?,
-                            Ok(()) => break,
-                        }
-                    };
-
-                    queries_sent += 1;
-                }
-            }
-
-            let dur = inst.elapsed().as_secs();
-            info!(
-                "Done! Sent {} leaderboard queries in {} seconds ({} queries per seconds).",
-                queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
-            );
         }
 
-        for guard in guards {
-            match guard.join().unwrap() {
-                Ok(()) => {}
-                Err(err) => {
-                    error!("Worker thread error on closing: {}", err);
+        // Ticker to flush the CSV file every second:
+        let ticker = tick(time::Duration::from_secs(1));
+
+        // Spawn thread for writing CSV file
+        let guard = thread::spawn(move || -> Result<()> {
+            loop {
+                select! {
+                    recv(ticker) -> _ => { wrt.flush()?; },
+                    recv(rows_r) -> row => match row {
+                        Ok(row) => { wrt.serialize(row)?; },
+                        Err(_) => { break; },
+                    },
                 }
             };
+
+            Ok(())
+        });
+
+        guards.push(guard);
+
+        info!("Gathering connected realm ID-s...");
+        let realms = query_connected_realms(gctx)?;
+        let inst = time::Instant::now();
+        let sleep_dur = time::Duration::from_millis((1000f32/rate) as _);
+        let mut queries_sent = 0;
+        for connected_realm in realms {
+            let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
+            for index in realm_leaderboard_index {
+                let q = GetMythicLeaderboard {
+                    connected_realm_id: connected_realm,
+                    dungeon_id: index.dungeon_id,
+                    period: period_id,
+                };
+
+                // TODO: think about the rate limiting algorithm little bit more
+                loop {
+                    thread::sleep(sleep_dur);
+                    match queries_s.try_send(q) {
+                        Err(TrySendError::Full(_)) => continue,
+                        Err(TrySendError::Disconnected(_)) =>
+                            Err("Unexpected disconnect of a send-channel (queries_s).")?,
+                        Ok(()) => break,
+                    }
+                };
+
+                queries_sent += 1;
+            }
         }
+
+        let dur = inst.elapsed().as_secs();
+        info!(
+            "Done! Sent {} leaderboard queries in {} seconds ({} queries per seconds).",
+            queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
+        );
+    }
+
+    for guard in guards {
+        match guard.join().unwrap() {
+            Ok(()) => {}
+            Err(err) => {
+                error!("Worker thread error on closing: {}", err);
+            }
+        };
     }
 
     Ok(())
+}
+
+fn run() -> Result<()> {
+    env_logger::init();
+    dotenv().ok();
+
+    match Cfg::from_args() {
+        Cfg::Dedup{paths} => { run_dedup(paths)?; },
+        Cfg::Download(cmd) => { run_download(cmd)?; },
+    }
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(err) = run() {
+        println!("{}", err);
+        process::exit(1);
+    }
 }
