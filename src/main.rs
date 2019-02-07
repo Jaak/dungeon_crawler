@@ -17,18 +17,28 @@ extern crate dotenv;
 #[macro_use]
 extern crate crossbeam_channel;
 extern crate structopt;
+extern crate tempfile;
+extern crate cuckoofilter;
+extern crate fs2;
 
 use chrono::prelude::*;
 use crossbeam_channel::{bounded, tick, TrySendError};
+use cuckoofilter::{CuckooFilter};
 use curl::easy::{Easy, List};
 use dotenv::dotenv;
+use fs2::FileExt;
 use log::{error, info, warn};
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::str::FromStr;
 use std::{env, error, process, str, thread, time, path, fs};
+use std::io::prelude::*;
+use std::io::{BufReader, BufWriter};
+use std::fs::{File};
 use structopt::StructOpt;
+use tempfile::{NamedTempFile};
 
 struct Ctx {
     access_token: String,
@@ -589,19 +599,67 @@ fn main() {
     version = "0.2.0",
     author = "Jaak Randmets <jaak.ra@gmail.com>",
     rename_all = "kebab-case")]
-struct Cfg {
-    #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw or kr.")]
-    region: Region,
-    #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
-    workers: usize,
-    #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
-    rate: f32,
-    #[structopt(long, help="Time period ID. Use latest time period as default.")]
-    period: Option<u32>,
-    #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
-    output: Option<path::PathBuf>,
-    #[structopt(long, help="Print information about latest period ID.")]
-    show_latest_period: bool,
+enum Cfg {
+    #[structopt(name = "download")]
+    Download {
+        #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw or kr.")]
+        region: Region,
+        #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
+        workers: usize,
+        #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
+        rate: f32,
+        #[structopt(long, help="Time period ID. Use latest time period as default.")]
+        period: Option<u32>,
+        #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
+        output: Option<path::PathBuf>,
+        #[structopt(long, help="Print information about latest period ID.")]
+        show_latest_period: bool,
+    },
+    #[structopt(name = "dedup")]
+    Dedup {
+        #[structopt(help="CSV files to deduplicate.", parse(from_os_str))]
+        files: Vec<path::PathBuf>,
+    }
+}
+
+// Deduplicate rows (possibly imperfectly) of a given text file.
+// The file in given path will be overwritten by deduplicated file.
+// Note that with a low probability the result may still have some
+// duplicate rows.
+fn dedup_rows(path: path::PathBuf) -> Result<()> {
+    let file = File::open(&path)?;
+    // NOTE: Lock will be released when the file handle is closed
+    file.try_lock_exclusive()?;
+    let temp = NamedTempFile::new()?;
+    temp.as_file().try_lock_exclusive()?;
+    let mut dropped = 0;
+    let mut lines = 0;
+    let mut filter = CuckooFilter::<DefaultHasher>::new();
+    let mut writer = BufWriter::new(&temp);
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        let line_u8 = line.as_bytes();
+        if filter.test_and_add(line_u8) {
+            writer.write_all(line_u8)?;
+            writer.write_all(b"\n")?;
+        } else {
+            dropped += 1;
+        }
+
+        lines += 1;
+    }
+
+    if lines == 0 || dropped == 0 {
+        info!("No lines removed from '{}'", path.display());
+    }
+    else {
+        let rate = 100.0 * (dropped as f32 / lines as f32);
+        info!("Removed {}% lines from '{}'", rate.round(), path.display());
+    }
+
+    drop(writer);
+    temp.persist(path)?;
+    Ok(())
 }
 
 fn run() -> Result<()> {
@@ -611,182 +669,197 @@ fn run() -> Result<()> {
     let client_id = env::var("CLIENT_ID")?;
     let client_secret = env::var("CLIENT_SECRET")?;
     let cfg = Cfg::from_args();
-    let region = cfg.region;
-    let num_workers = cfg.workers;
-    let rate = cfg.rate;
-    let period = cfg.period;
-    let output = cfg.output;
 
-    info!("Requesting token...");
-    let mut easy = Easy::new();
-    let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
-
-    // Global context
-    let gctx = &Ctx {
-        access_token: access_token.access_token.clone(),
-        region: region,
-        easy: RefCell::new(easy),
-    };
-
-    let period_id = match period {
-        None => query_period_index(gctx)?.current_period.id,
-        Some(id) => id,
-    };
-
-    // TODO: weirdness with this option
-    if cfg.show_latest_period {
-        let vec = query_period_index(gctx)?.periods;
-        if let Some(index) = vec.last() {
-            let period = query_period(gctx, index.id)?;
-            println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
-        }
-
-        process::exit(0);
-    }
-
-    info!("Querying period info (period_id = {})", period_id);
-    let period_info = query_period(gctx, period_id)?;
-    let path = match output {
-        Some(path) => path,
-        None => {
-            let dt = Utc.timestamp_millis(period_info.start_timestamp as i64);
-            let csv_file_name = format!(
-                "{}-leaderboard-{}.csv",
-                dt.format("%Y-%m-%d"),
-                region.query_str()
-            );
-
-            path::PathBuf::from(csv_file_name)
-        }
-    };
-
-    let exists = path.exists();
-    if exists &&  ! path.is_file() {
-        error!("\'{}\' is not a file.", path.display());
-        process::exit(1);
-    }
-
-    info!("{} leaderboard to {}",
-        if exists { "Appending" } else { "Writing" },
-        path.display());
-
-    let create = ! exists;
-    let file = fs::OpenOptions::new()
-        .append(true).write(true).create(create).open(&path)?;
-
-    let mut wrt = csv::WriterBuilder::new()
-        .delimiter(b';').has_headers(create).from_writer(file);
-
-    let mut guards = Vec::new();
-    {
-        // Main thread sends queries to worker threads:
-        let (queries_s, queries_r) = bounded(num_workers);
-
-        // Worker threads send CSV rows to CSV writer thread:
-        let (rows_s, rows_r) = bounded(num_workers);
-
-        // Spawn worker threads
-        for _ in 1..num_workers {
-            let mut easy = Easy::new();
-            easy.accept_encoding("gzip")?;
-
-            let ctx = Ctx {
-                access_token: access_token.access_token.clone(),
-                region: region,
-                easy: RefCell::new(easy),
-            };
-
-            let rows_s = rows_s.clone();
-            let handle_query = move |q| -> Result<()> {
-                let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
-                let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
-                if let Some(leading_groups) = leaderboard.leading_groups {
-                    for leading_group in leading_groups {
-                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
-                    }
+    if let Cfg::Dedup{files} = cfg {
+        crossbeam::scope(|scope| {
+            for file in files {
+                if ! file.is_file() {
+                    error!("ERROR: '{}' is not a file. Skipping.", file.display());
+                    continue;
                 }
 
-                Ok(())
+                scope.spawn(move |_| {
+                    if let Err(err) = dedup_rows(file) {
+                        error!("ERROR: {}", err);
+                    }
+                });
             };
+        }).unwrap();
+    }
+    else
+    if let Cfg::Download{region, workers, rate, period, output, show_latest_period} = cfg {
 
-            let queries_r = queries_r.clone();
+        info!("Requesting token...");
+        let mut easy = Easy::new();
+        let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
+
+        // Global context
+        let gctx = &Ctx {
+            access_token: access_token.access_token.clone(),
+            region: region,
+            easy: RefCell::new(easy),
+        };
+
+        let period_id = match period {
+            None => query_period_index(gctx)?.current_period.id,
+            Some(id) => id,
+        };
+
+        // TODO: weirdness with this option
+        if show_latest_period {
+            let vec = query_period_index(gctx)?.periods;
+            if let Some(index) = vec.last() {
+                let period = query_period(gctx, index.id)?;
+                println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
+            }
+
+            process::exit(0);
+        }
+
+        info!("Querying period info (period_id = {})", period_id);
+        let period_info = query_period(gctx, period_id)?;
+        let path = match output {
+            Some(path) => path,
+            None => {
+                let dt = Utc.timestamp_millis(period_info.start_timestamp as i64);
+                let csv_file_name = format!(
+                    "{}-leaderboard-{}.csv",
+                    dt.format("%Y-%m-%d"),
+                    region.query_str()
+                );
+
+                path::PathBuf::from(csv_file_name)
+            }
+        };
+
+        let exists = path.exists();
+        if exists &&  ! path.is_file() {
+            error!("\'{}\' is not a file.", path.display());
+            process::exit(1);
+        }
+
+        info!("{} leaderboard to {}",
+            if exists { "Appending" } else { "Writing" },
+            path.display());
+
+        let create = ! exists;
+        let file = fs::OpenOptions::new()
+            .append(true).write(true).create(create).open(&path)?;
+
+        let mut wrt = csv::WriterBuilder::new()
+            .delimiter(b';').has_headers(create).from_writer(file);
+
+        let mut guards = Vec::new();
+        {
+            // Main thread sends queries to worker threads:
+            let (queries_s, queries_r) = bounded(workers);
+
+            // Worker threads send CSV rows to CSV writer thread:
+            let (rows_s, rows_r) = bounded(workers);
+
+            // Spawn worker threads
+            for _ in 1..workers {
+                let mut easy = Easy::new();
+                easy.accept_encoding("gzip")?;
+
+                let ctx = Ctx {
+                    access_token: access_token.access_token.clone(),
+                    region: region,
+                    easy: RefCell::new(easy),
+                };
+
+                let rows_s = rows_s.clone();
+                let handle_query = move |q| -> Result<()> {
+                    let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
+                    let dungeon = Dungeon::from_str(leaderboard.map.name.as_str())?;
+                    if let Some(leading_groups) = leaderboard.leading_groups {
+                        for leading_group in leading_groups {
+                            rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                        }
+                    }
+
+                    Ok(())
+                };
+
+                let queries_r = queries_r.clone();
+                let guard = thread::spawn(move || -> Result<()> {
+                    loop {
+                        match queries_r.recv() {
+                            Ok(q) => { handle_query(q)?; }
+                            Err(_) => { break; }
+                        }
+                    }
+
+                    Ok(())
+                });
+
+                guards.push(guard);
+            }
+
+            // Ticker to flush the CSV file every second:
+            let ticker = tick(time::Duration::from_secs(1));
+
+            // Spawn thread for writing CSV file
             let guard = thread::spawn(move || -> Result<()> {
                 loop {
-                    match queries_r.recv() {
-                        Ok(q) => { handle_query(q)?; }
-                        Err(_) => { break; }
+                    select! {
+                        recv(ticker) -> _ => { wrt.flush()?; },
+                        recv(rows_r) -> row => match row {
+                            Ok(row) => { wrt.serialize(row)?; },
+                            Err(_) => { break; },
+                        },
                     }
-                }
+                };
 
                 Ok(())
             });
 
             guards.push(guard);
+
+            info!("Gathering connected realm ID-s...");
+            let realms = query_connected_realms(gctx)?;
+            let inst = time::Instant::now();
+            let sleep_dur = time::Duration::from_millis((1000f32/rate) as _);
+            let mut queries_sent = 0;
+            for connected_realm in realms {
+                let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
+                for index in realm_leaderboard_index {
+                    let q = GetMythicLeaderboard {
+                        connected_realm_id: connected_realm,
+                        dungeon_id: index.dungeon_id,
+                        period: period_id,
+                    };
+
+                    // TODO: think about the rate limiting algorithm little bit more
+                    loop {
+                        thread::sleep(sleep_dur);
+                        match queries_s.try_send(q) {
+                            Err(TrySendError::Full(_)) => continue,
+                            Err(TrySendError::Disconnected(_)) =>
+                                Err("Unexpected disconnect of a send-channel (queries_s).")?,
+                            Ok(()) => break,
+                        }
+                    };
+
+                    queries_sent += 1;
+                }
+            }
+
+            let dur = inst.elapsed().as_secs();
+            info!(
+                "Done! Sent {} leaderboard queries in {} seconds ({} queries per seconds).",
+                queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
+            );
         }
 
-        // Ticker to flush the CSV file every second:
-        let ticker = tick(time::Duration::from_secs(1));
-
-        // Spawn thread for writing CSV file
-        let guard = thread::spawn(move || -> Result<()> {
-            loop {
-                select! {
-                    recv(ticker) -> _ => { wrt.flush()?; },
-                    recv(rows_r) -> row => match row {
-                        Ok(row) => { wrt.serialize(row)?; },
-                        Err(_) => { break; },
-                    },
+        for guard in guards {
+            match guard.join().unwrap() {
+                Ok(()) => {}
+                Err(err) => {
+                    error!("Worker thread error on closing: {}", err);
                 }
             };
-
-            Ok(())
-        });
-
-        guards.push(guard);
-
-        info!("Gathering connected realm ID-s...");
-        let realms = query_connected_realms(gctx)?;
-        let inst = time::Instant::now();
-        let sleep_dur = time::Duration::from_millis((1000f32/rate) as _);
-        let mut queries_sent = 0;
-        for connected_realm in realms {
-            let realm_leaderboard_index = query_mythic_leaderboard_index(gctx, connected_realm)?;
-            for index in realm_leaderboard_index {
-                let q = GetMythicLeaderboard {
-                    connected_realm_id: connected_realm,
-                    dungeon_id: index.dungeon_id,
-                    period: period_id,
-                };
-
-                // TODO: think about the rate limiting algorithm little bit more
-                loop {
-                    thread::sleep(sleep_dur);
-                    match queries_s.try_send(q) {
-                        Err(TrySendError::Full(_)) => continue,
-                        Err(TrySendError::Disconnected(_)) =>
-                            Err("Unexpected disconnect of a send-channel (queries_s).")?,
-                        Ok(()) => break,
-                    }
-                };
-
-                queries_sent += 1;
-            }
         }
-
-        let dur = inst.elapsed().as_secs();
-        info!(
-            "Done! Sent {} leaderboard queries in {} seconds ({} queries per seconds).",
-            queries_sent, dur, if dur > 0 { queries_sent / dur } else { 0 }
-        );
-    }
-
-    for guard in guards {
-        match guard.join().unwrap() {
-            Ok(()) => {}
-            Err(err) => {
-                error!("Worker thread error on closing: {}", err);
-            }
-        };
     }
 
     Ok(())
