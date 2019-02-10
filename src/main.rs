@@ -145,7 +145,7 @@ enum Dungeon {
 }
 
 impl FromStr for Dungeon {
-    type Err = &'static str;
+    type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Dungeon, Self::Err> {
         lazy_static! {
@@ -164,7 +164,10 @@ impl FromStr for Dungeon {
             ].iter().cloned().collect();
         }
 
-        HASH_MAP.get(s).cloned().ok_or("Missing entry")
+        match HASH_MAP.get(s) {
+            None => Err(format!("Bad dungeon name '{}'", s)),
+            Some(dungeon) => Ok(dungeon.clone()),
+        }
     }
 }
 
@@ -245,22 +248,16 @@ impl DataRow {
         result
     }
 
-    fn set_healer(&mut self, spec: HealerSpecialization) -> bool {
-        if self.healer.is_some() {
-            return false;
+    fn set_healer(&mut self, spec: HealerSpecialization) {
+        if self.healer.is_none() {
+            self.healer = Some(spec);
         }
-
-        self.healer = Some(spec);
-        return true;
     }
 
-    fn set_tank(&mut self, spec: TankSpecialization) -> bool {
-        if self.tank.is_some() {
-            return false;
+    fn set_tank(&mut self, spec: TankSpecialization) {
+        if self.tank.is_none() {
+            self.tank = Some(spec);
         }
-
-        self.tank = Some(spec);
-        return true;
     }
 
     fn update_faction(&mut self, faction_name: &str) {
@@ -271,47 +268,46 @@ impl DataRow {
         }
     }
 
-    fn update_group_composition(&mut self, id: u32) -> bool {
+    fn update_group_composition(&mut self, id: u32) {
         match id {
-            62 => { self.num_arcane_mage += 1; true },
-            63 => { self.num_fire_mage += 1; true },
-            64 => { self.num_frost_mage += 1; true },
+            62 => self.num_arcane_mage += 1,
+            63 => self.num_fire_mage += 1,
+            64 => self.num_frost_mage += 1,
             65 => self.set_healer(HealerSpecialization::HolyPaladin),
             66 => self.set_tank(TankSpecialization::ProtectionPaladin),
-            70 => { self.num_retribution_paladin += 1; true },
-            71 => { self.num_arms_warrior += 1; true },
-            72 => { self.num_fury_warrior += 1; true },
+            70 => self.num_retribution_paladin += 1,
+            71 => self.num_arms_warrior += 1,
+            72 => self.num_fury_warrior += 1,
             73 => self.set_tank(TankSpecialization::ProtectionWarrior),
-            102 => { self.num_balance_druid += 1; true },
-            103 => { self.num_feral_druid += 1; true },
+            102 => self.num_balance_druid += 1,
+            103 => self.num_feral_druid += 1,
             104 => self.set_tank(TankSpecialization::GuardianDruid),
             105 => self.set_healer(HealerSpecialization::RestorationDruid),
             250 => self.set_tank(TankSpecialization::BloodDk),
-            251 => { self.num_frost_dk += 1; true },
-            252 => { self.num_unholy_dk += 1; true },
-            253 => { self.num_beast_master_hunter += 1; true },
-            254 => { self.num_marksmanship_hunter += 1; true },
-            255 => { self.num_survival_hunter += 1; true },
+            251 => self.num_frost_dk += 1,
+            252 => self.num_unholy_dk += 1,
+            253 => self.num_beast_master_hunter += 1,
+            254 => self.num_marksmanship_hunter += 1,
+            255 => self.num_survival_hunter += 1,
             256 => self.set_healer(HealerSpecialization::DisciplinePriest),
             257 => self.set_healer(HealerSpecialization::HolyPriest),
-            258 => { self.num_shadow_priest += 1; true },
-            259 => { self.num_assassination_rogue += 1; true },
-            260 => { self.num_outlaw_rogue += 1; true },
-            261 => { self.num_subtlety_rogue += 1; true },
-            262 => { self.num_elemental_shaman += 1; true },
-            263 => { self.num_enhancement_shaman += 1; true },
+            258 => self.num_shadow_priest += 1,
+            259 => self.num_assassination_rogue += 1,
+            260 => self.num_outlaw_rogue += 1,
+            261 => self.num_subtlety_rogue += 1,
+            262 => self.num_elemental_shaman += 1,
+            263 => self.num_enhancement_shaman += 1,
             264 => self.set_healer(HealerSpecialization::RestorationShaman),
-            265 => { self.num_affliction_warlock += 1; true },
-            266 => { self.num_demonology_warlock += 1; true },
-            267 => { self.num_destruction_warlock += 1; true },
+            265 => self.num_affliction_warlock += 1,
+            266 => self.num_demonology_warlock += 1,
+            267 => self.num_destruction_warlock += 1,
             268 => self.set_tank(TankSpecialization::BrewmasterMonk),
-            269 => { self.num_windwalker_monk += 1; true },
+            269 => self.num_windwalker_monk += 1,
             270 => self.set_healer(HealerSpecialization::MistweaverMonk),
-            577 => { self.num_havoc_dh += 1; true },
+            577 => self.num_havoc_dh += 1,
             581 => self.set_tank(TankSpecialization::VengeanceDh),
             _ => {
                 warn!("Unspecified specialization ID {}", id);
-                false
             }
         }
     }
@@ -328,21 +324,14 @@ mod json {
     }
 
     #[derive(Deserialize, Debug)]
-    pub struct Href {
-        pub href: String,
-    }
-
-    #[derive(Deserialize, Debug)]
-    pub struct _Self {
-        #[serde(rename = "self")]
-        pub _self: Href,
-    }
-
-    #[derive(Deserialize, Debug)]
     pub struct LeaderboardIndexEntry {
-        pub key: Href,
         pub name: String,
         pub id: u32,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Href {
+        pub href: String,
     }
 
     #[derive(Deserialize, Debug)]
@@ -468,20 +457,16 @@ where
     match serde_json::from_slice(data.as_slice()) {
         Ok(json_value) => Ok(json_value),
         Err(err) => {
-            let raw_json: serde_json::Value = serde_json::from_slice(data.as_slice())?;
-            error!("Failed to parse json string: {}", raw_json);
+            error!("Failed to parse json string: {}", String::from_utf8(data)?);
             Err(Box::new(err))
         }
     }
 }
 
 // Resulting token is just printed out to stdout.
-fn token_request(
-    easy: &mut Easy,
-    region: Region,
-    client_id: &str,
-    client_secret: &str,
-) -> Result<json::AccessToken> {
+fn token_request(easy: &mut Easy, region: Region) -> Result<json::AccessToken> {
+    let client_id = &env::var("CLIENT_ID")?;
+    let client_secret = &env::var("CLIENT_SECRET")?;
     let url = &format!(
         "{uri}?grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
         uri=region.token_uri(),
@@ -489,15 +474,18 @@ fn token_request(
         client_secret=client_secret
     );
 
-    easy.url(url).unwrap();
-
+    easy.url(url)?;
     let mut list = List::new();
-    list.append("Accept: application/json").unwrap();
-    easy.http_headers(list).unwrap();
-
+    list.append("Accept: application/json")?;
+    easy.http_headers(list)?;
     let data = write_to_vector(easy)?;
-    let json_value = serde_json::from_slice(data.as_slice())?;
-    Ok(json_value)
+    match serde_json::from_slice(data.as_slice()) {
+        Ok(json_value) => Ok(json_value),
+        Err(err) => {
+            error!("Failed to parse json string: {}", String::from_utf8(data)?);
+            Err(Box::new(err))
+        }
+    }
 }
 
 fn query_connected_realms(ctx: &Ctx) -> Result<Vec<u32>> {
@@ -524,34 +512,19 @@ fn query_connected_realms(ctx: &Ctx) -> Result<Vec<u32>> {
 struct LeaderboardEntry {
     dungeon_name: Dungeon,
     dungeon_id: u32,
-    period: u32,
 }
 
 fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<LeaderboardEntry>> {
-    lazy_static! {
-        static ref MATCH_URL: Regex =
-            Regex::new(r"/mythic-leaderboard/(?P<dungeonId>\d+)/period/(?P<period>\d+)").unwrap();
-    }
-
     let query_str = &format!(
         "data/wow/connected-realm/{connectedRealmId}/mythic-leaderboard/index",
         connectedRealmId = realm_id);
     let leaderboard: json::LeaderboardIndex = query(ctx, query_str)?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
-        let url = entry.key.href;
-        let dungeon_name = Dungeon::from_str(&entry.name)?;
-        let dungeon_id = entry.id;
-        for c in MATCH_URL.captures_iter(&url) {
-            let dungeon_id2 = c.name("dungeonId").unwrap().as_str().parse::<u32>()?;
-            assert_eq!(dungeon_id, dungeon_id2);
-            let period = c.name("period").unwrap().as_str().parse()?;
-            result.push(LeaderboardEntry {
-                dungeon_name,
-                dungeon_id,
-                period,
-            });
-        }
+        result.push(LeaderboardEntry {
+            dungeon_name: Dungeon::from_str(&entry.name)?,
+            dungeon_id: entry.id,
+        });
     }
 
     Ok(result)
@@ -669,13 +642,11 @@ fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
 }
 
 fn run_download(cmd: DownloadCmd) -> Result<()> {
-    let client_id = &env::var("CLIENT_ID")?;
-    let client_secret = &env::var("CLIENT_SECRET")?;
 
     info!("Requesting token...");
     let mut easy = Easy::new();
     let DownloadCmd{region, workers, rate, period, output, show_latest_period} = cmd;
-    let access_token = &token_request(&mut easy, region, client_id, client_secret)?;
+    let access_token = &token_request(&mut easy, region)?;
 
     // Global context
     let gctx = &Ctx {
@@ -784,10 +755,13 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
         let guard = thread::spawn(move || -> Result<()> {
             loop {
                 select! {
-                    recv(ticker) -> _ => { wrt.flush()?; },
+                    recv(ticker) -> _ => wrt.flush()?,
                     recv(rows_r) -> row => match row {
-                        Ok(row) => { wrt.serialize(row)?; },
-                        Err(_) => { break; },
+                        Ok(row) => wrt.serialize(row)?,
+                        Err(_) => {
+                            // This means that rows_r has been closed.
+                            break;
+                        },
                     },
                 }
             };
@@ -850,8 +824,8 @@ fn run() -> Result<()> {
     dotenv().ok();
 
     match Cfg::from_args() {
-        Cfg::Dedup{paths} => { run_dedup(paths)?; },
-        Cfg::Download(cmd) => { run_download(cmd)?; },
+        Cfg::Dedup{paths} => run_dedup(paths)?,
+        Cfg::Download(cmd) => run_download(cmd)?,
     }
 
     Ok(())
