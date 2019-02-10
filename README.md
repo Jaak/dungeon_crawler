@@ -12,14 +12,24 @@ Afer doing so client ID and secret can be specified via `CLIENT_ID` and
 
 Because we are using credentials flow there's no need for authorization (with password).
 
+## Usage
+
+To download most recent week leaderboards of eu realms:
+```bash
+$ dungeon-crawler download --realm eu
+```
+
+Supported regions are 'eu', 'us', 'tw' and 'kr'. Display more options with `--help`.
+
 ## TODO
 
+- [x] Command line parameters (week, region).
+- [x] ~~Support chinese realms.~~ Turns out the API for CN is not available.
+- [ ] Time series analysis (using timestamps attached to data).
 - [ ] Use proper OAuth2 library. Currently we are making curl requests.
 - [ ] Find a better way to represent groups with multiple tank/healer roles.
-- [ ] Support chinese realms.
 - [ ] Correlate data with affixes.
-- [ ] Time series analysis (using timestamps attached to data).
 
-# License
+## License
 
 The code is open under MIT license.
