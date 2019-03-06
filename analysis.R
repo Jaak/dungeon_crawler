@@ -104,7 +104,7 @@ DpsShortNames <- c(
 # exit(1)
 
 SavePlotAsPng <- function(name, plot) {
-    ggsave(name, plot = plot, width = 7, height = 4, type = "quartz", family="Times New Roman")
+    ggsave(name, plot = plot, width = 7, height = 4, type = "quartz")
 }
 
 RunDurationBoxplot <- function(Board) {
@@ -399,6 +399,36 @@ AnimateDungeons<- function(Board, L) {
     return (anim)
 }
 
+# Following function adds DayNr and WeekNr rows to database.
+# This is pretty ugly code, sorry.
+# This is bit tricky because different regions reset different times and we
+# don't want for two different affix combinations have same DayNr or WeekNr.
+# This means that two runs in different regions that have same time may have
+# different DayNr. This is intentional.
+AttachDayAndWeekNumbers <- function(Board) {
+    DayIndex <- Board[, .(Day = min(Datetime), Dummy = 1), by=.(Region, PeriodId)]
+    Offsets <- data.table(Offset = days(0 : 6), DayNr = c(1 : 7), Dummy = c(1,1,1,1,1,1,1))
+
+    DayIndex <- Offsets[DayIndex, on = 'Dummy', mult = 'all', allow.cartesian=TRUE]
+    DayIndex[, Dummy := NULL]
+    DayIndex[, DayBegin := Day + Offset]
+    DayIndex[, DayEnd := DayBegin + days(1)]
+    DayIndex[, Offset := NULL]
+    DayIndex[, Day := NULL]
+    setkeyv(DayIndex, c("Region", "PeriodId", "DayBegin", "DayEnd"))
+
+    Board[, Datetime2 := Datetime]
+    Board <- foverlaps(Board, DayIndex,
+        by.x = c("Region", "PeriodId", "Datetime", "Datetime2"),
+        by.y = c("Region", "PeriodId", "DayBegin", "DayEnd"),
+        type = "within",
+        mult = "first")
+    Board[, Datetime2 := NULL]
+    Board[, WeekNr := PeriodId - min(PeriodId) + 1]
+    Board[, DayNr := DayNr + 7*(WeekNr - 1)]
+    return (Board)
+}
+
 #
 # Read DB and print some useful information:
 #
@@ -408,31 +438,8 @@ Board <- readRDS("db.rds")
 # Board <- readRDS("db-season1.rds")
 cat(paste0("    Loaded ", nrow(Board), " rows\n"))
 
-DayIndex <- Board[, .(Day = min(Datetime), Dummy = 1), by=.(Region, PeriodId)]
-Offsets <- data.table(Offset = days(0 : 6), DayNr = c(1 : 7), Dummy = c(1,1,1,1,1,1,1))
-
-#
-# Split data into days in a more sensible way:
-#
-
-DayIndex <- Offsets[DayIndex, on = 'Dummy', mult = 'all', allow.cartesian=TRUE]
-DayIndex[, Dummy := NULL]
-DayIndex[, DayBegin := Day + Offset]
-DayIndex[, DayEnd := DayBegin + days(1)]
-DayIndex[, Offset := NULL]
-DayIndex[, Day := NULL]
-setkeyv(DayIndex, c("Region", "PeriodId", "DayBegin", "DayEnd"))
-
-cat("    Attaching day numbers...\n")
-Board[, Datetime2 := Datetime]
-Board <- foverlaps(Board, DayIndex,
-    by.x = c("Region", "PeriodId", "Datetime", "Datetime2"),
-    by.y = c("Region", "PeriodId", "DayBegin", "DayEnd"),
-    type = "within",
-    mult = "first")
-Board[, Datetime2 := NULL]
-Board[, WeekNr := PeriodId - min(PeriodId) + 1]
-Board[, DayNr := DayNr + 7*(WeekNr - 1)]
+cat("    Attaching day and week numbers...\n")
+Board <- AttachDayAndWeekNumbers(Board)
 
 cat("    Rebuilding database keys...\n")
 setkeyv(Board, c(key(Board), "WeekNr", "DayNr"))
@@ -475,7 +482,7 @@ if (TRUE) {
     Indicators <- Indicators[! is.na(Indicator)]
 
     Summ <- Indicators[,
-        Board[KeystoneLevel >= 10,
+        Board[WeekNr == max(WeekNr) & KeystoneLevel >= 10,
             .(Odds = sum(Success) / .N),
             by=.(Has = (get(Indicator) > 0))],
         keyby = .(Indicator)]

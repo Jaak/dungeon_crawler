@@ -74,6 +74,7 @@ args <- commandArgs(TRUE)
 
 
 Db <- NULL
+setDTthreads()
 DbFileName <- "db.rds"
 
 # XXX
