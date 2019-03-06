@@ -166,7 +166,7 @@ impl FromStr for Dungeon {
 
         match HASH_MAP.get(s) {
             None => Err(format!("Bad dungeon name '{}'", s)),
-            Some(dungeon) => Ok(dungeon.clone()),
+            Some(dungeon) => Ok(*dungeon),
         }
     }
 }
@@ -562,7 +562,7 @@ struct DownloadCmd {
     #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
     output: Option<path::PathBuf>,
     #[structopt(long, help="Print information about latest period ID.")]
-    show_latest_period: bool,
+    show_period: bool,
 }
 
 #[derive(StructOpt)]
@@ -645,7 +645,7 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
 
     info!("Requesting token...");
     let mut easy = Easy::new();
-    let DownloadCmd{region, workers, rate, period, output, show_latest_period} = cmd;
+    let DownloadCmd{region, workers, rate, period, output, show_period} = cmd;
     let access_token = &token_request(&mut easy, region)?;
 
     // Global context
@@ -660,15 +660,18 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
         Some(id) => id,
     };
 
-    // TODO: weirdness with this option
-    if show_latest_period {
+    if show_period {
         let vec = query_period_index(gctx)?.periods;
-        if let Some(index) = vec.last() {
-            let period = query_period(gctx, index.id)?;
-            println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
+        for index in vec.into_iter().rev() {
+            if index.id == period_id {
+                let period = query_period(gctx, index.id)?;
+                println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
+                process::exit(0);
+            }
         }
 
-        process::exit(0);
+        error!("No such period found!");
+        process::exit(1);
     }
 
     info!("Querying period info (period_id = {})", period_id);
