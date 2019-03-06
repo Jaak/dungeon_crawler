@@ -12,14 +12,39 @@ Afer doing so client ID and secret can be specified via `CLIENT_ID` and
 
 Because we are using credentials flow there's no need for authorization (with password).
 
-## Usage
+## Building the web crawler
+
+Leaderboard crawler has been implemented in [rust](https://www.rust-lang.org) programming language.
+
+If you already have rust installed building the code is as easy as `cargo build`. Do not be scared of all the dependencies that are downloaded. I have heavily relied on external libraries for web access, deserialization from JSON and serialization to CSV, parallelization, command line parsing etc. To run the executable `cargo run -- --help` (to see help message) or `cargo run -- download --region eu` (to download this weeks leaderboard data for entire eu region).
+
+If you want to track log message while downloading a specific week of leaderboards:
+```bash
+$ RUST_LOG=dungeon_crawler cargo run -- download --region eu --period 687
+```
+
+Easiest way to install rust is to use [rustup](https://www.rust-lang.org/tools/install) and follow the guide on the website. This should work for both linux and osx. I have not tested windows.
+
+## Usage of the web crawler
 
 To download most recent week leaderboards of eu realms:
 ```bash
-$ dungeon-crawler download --realm eu
+$ dungeon-crawler download --region eu
 ```
 
+This creates a CSV file that on every row contains information about individual run and the group composition. Hopefully, the structure of the file is self-evident
+
 Supported regions are 'eu', 'us', 'tw' and 'kr'. Display more options with `--help`.
+
+## Usage of R scripts
+
+I have split R code into two parts:
+- `loadCSV.R` reads a set of CSV files, preprocess them and stored database as R object `db.rds`
+- `analysis.R` read the database file (default `db.rds`) and draws bunch of charts and graphs from the data.
+
+During preprocessing we remove duplicate entries, convert timestamps to a more usable format, and check if a run was successful or not. We have split data loading into seperate script in order to make testing various charts faster process.
+
+The `analysis.R` file is very much intended to be modified! In general drawing of each plot has been split into a different function. Scroll all the way down to bottom to see what functionality I have played around with in the past.
 
 ## TODO
 
