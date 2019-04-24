@@ -3,7 +3,6 @@ library(ggplot2)
 library(viridis)
 library(scales)
 library(lubridate)
-library(extrafont)
 
 ReadSpecInfo <- function() {
     colClasses <- c("factor","factor","factor")
@@ -450,7 +449,13 @@ cat("Plotting...\n")
 # General style:
 #
 
-theme_set(theme_linedraw() + theme(text = element_text(family = 'Caladea')))
+theme_set(theme_linedraw())
+
+# Disable the following conditional if you don't want to bother with fancy fonts.
+if (TRUE) {
+    library(extrafont)
+    theme_set(theme_linedraw() + theme(text = element_text(family = 'Caladea')))
+}
 
 #
 # Working on some ideas:
