@@ -8,7 +8,12 @@ pretty pictures from it.
 For accessing leaderboard data you need to set up API access
 in Blizzard [developer zone](https://develop.battle.net/).
 Afer doing so client ID and secret can be specified via `CLIENT_ID` and
-`CLIENT_SECRET` environment variables. These variables can be set in `.env` file.
+`CLIENT_SECRET` environment variables. These variables can be set in `.env`
+file something like this:
+```
+CLIENT_ID="ffffffffffffffffffffffffffffffff"
+CLIENT_SECRET="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
 
 Because we are using credentials flow there's no need for authorization (with password).
 
@@ -20,7 +25,7 @@ If you already have rust installed building the code is as easy as `cargo build`
 
 If you want to track log message while downloading a specific week of leaderboards:
 ```bash
-$ RUST_LOG=dungeon_crawler cargo run -- download --region eu --period 687
+$ cargo run -- download --region eu --period 687
 ```
 
 Easiest way to install rust is to use [rustup](https://www.rust-lang.org/tools/install) and follow the guide on the website. This should work for both linux and osx. I have not tested windows.
