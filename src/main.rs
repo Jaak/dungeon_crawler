@@ -31,6 +31,7 @@ use log::{error, info, warn};
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::str::FromStr;
 use std::{env, error, process, str, thread, time, path, fs};
@@ -71,7 +72,7 @@ enum HealerSpecialization {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
 enum Region {
     Eu = 1,
     Us,
@@ -413,6 +414,16 @@ mod json {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
+#[serde(rename_all = "PascalCase")]
+struct PeriodIndexEntry {
+    pub region: Region,
+    #[serde(rename = "PeriodId")]
+    pub id: u32,
+    pub start_timestamp: u64,
+    pub end_timestamp: u64,
+}
+
 #[derive(Copy, Clone)]
 struct GetMythicLeaderboard {
     connected_realm_id: u32,
@@ -561,8 +572,6 @@ struct DownloadCmd {
     period: Option<u32>,
     #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
     output: Option<path::PathBuf>,
-    #[structopt(long, help="Print information about latest period ID.")]
-    show_period: bool,
 }
 
 #[derive(StructOpt)]
@@ -573,13 +582,63 @@ struct DownloadCmd {
     author = "Jaak Randmets <jaak.ra@gmail.com>",
     rename_all = "kebab-case")]
 enum Cfg {
-    #[structopt(name = "download")]
+    #[structopt(name = "download", about = "Download leaderboard data for a given week")]
     Download(DownloadCmd),
-    #[structopt(name = "dedup")]
+    #[structopt(name = "dedup", about = "Deduplicate a CSV file rows")]
     Dedup {
         #[structopt(help="CSV files to deduplicate.", parse(from_os_str))]
         paths: Vec<path::PathBuf>,
+    },
+    #[structopt(name = "update-period-index", about = "Updates period index for given region")]
+    UpdatePeriodIndex {
+        #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
+        region: Region,
+    },
+}
+
+// TODO: hard coded file name
+fn update_period_index(ctx: &Ctx, period_index: &json::PeriodIndex) -> Result<()> {
+
+    let path = path::PathBuf::from("data/static/period-index.csv");
+    if ! path.is_file() {
+        error!("ERROR: Period index '{}' is not a file. Not updating.", path.display());
+        return Ok(());
     }
+
+    let mut indices : HashSet<u32> = period_index.periods.iter().map(|x| x.id).collect();
+    {
+        let mut rdr = csv::ReaderBuilder::new().delimiter(b';').from_path(&path)?;
+        for record in rdr.deserialize() {
+            let record: PeriodIndexEntry = record?;
+            if record.region != ctx.region {
+                continue;
+            }
+
+            indices.remove(&record.id);
+        }
+    }
+
+    if indices.is_empty() {
+        return Ok(());
+    }
+
+    let file = fs::OpenOptions::new()
+        .append(true).write(true).create(false).open(&path)?;
+    file.try_lock_exclusive()?;
+    let mut wrt = csv::WriterBuilder::new()
+        .has_headers(false).delimiter(b';').from_writer(file);
+
+    for period_id in indices {
+        let period = query_period(ctx, period_id)?;
+        wrt.serialize(PeriodIndexEntry {
+            region: ctx.region,
+            id: period.id,
+            start_timestamp: period.start_timestamp,
+            end_timestamp: period.end_timestamp,
+        })?;
+    }
+
+    Ok(())
 }
 
 // Deduplicate rows (possibly imperfectly) of a given text file.
@@ -641,11 +700,24 @@ fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn run_update_period_index(region: Region) -> Result<()> {
+    let mut easy = Easy::new();
+    let access_token = &token_request(&mut easy, region)?;
+    let gctx = &Ctx {
+        access_token: access_token.access_token.clone(),
+        region: region,
+        easy: RefCell::new(easy),
+    };
+    let period_index = query_period_index(gctx)?;
+    update_period_index(gctx, &period_index)?;
+    Ok(())
+}
+
 fn run_download(cmd: DownloadCmd) -> Result<()> {
 
     info!("Requesting token...");
     let mut easy = Easy::new();
-    let DownloadCmd{region, workers, rate, period, output, show_period} = cmd;
+    let DownloadCmd{region, workers, rate, period, output} = cmd;
     let access_token = &token_request(&mut easy, region)?;
 
     // Global context
@@ -655,24 +727,19 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
         easy: RefCell::new(easy),
     };
 
+    // Query period ID index (TODO: cache this based on the latest time range)
+    let period_index = query_period_index(gctx)?;
     let period_id = match period {
-        None => query_period_index(gctx)?.current_period.id,
-        Some(id) => id,
-    };
-
-    if show_period {
-        let vec = query_period_index(gctx)?.periods;
-        for index in vec.into_iter().rev() {
-            if index.id == period_id {
-                let period = query_period(gctx, index.id)?;
-                println!("{:?};{};{};{}", region, index.id, period.start_timestamp, period.end_timestamp);
-                process::exit(0);
+        None => period_index.current_period.id,
+        Some(id) => {
+            if period_index.periods.iter().find(|index| index.id == id).is_none() {
+                error!("Invalid period index.");
+                process::exit(1);
             }
-        }
 
-        error!("No such period found!");
-        process::exit(1);
-    }
+            id
+        }
+    };
 
     info!("Querying period info (period_id = {})", period_id);
     let period_info = query_period(gctx, period_id)?;
@@ -823,12 +890,15 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
 }
 
 fn run() -> Result<()> {
+    std::env::set_var("RUST_BACˇKTRACE", "1");
+    std::env::set_var("RUST_LOG", "dungeon_crawler");
     env_logger::init();
     dotenv().ok();
 
     match Cfg::from_args() {
         Cfg::Dedup{paths} => run_dedup(paths)?,
         Cfg::Download(cmd) => run_download(cmd)?,
+        Cfg::UpdatePeriodIndex{region} => run_update_period_index(region)?,
     }
 
     Ok(())
