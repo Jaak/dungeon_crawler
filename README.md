@@ -55,6 +55,7 @@ The `analysis.R` file is very much intended to be modified! In general drawing o
 
 - [x] Command line parameters (week, region).
 - [x] ~~Support chinese realms.~~ Turns out the API for CN is not available.
+- [ ] Timebox dungeon time limits.
 - [ ] Time series analysis (using timestamps attached to data).
 - [ ] Use proper OAuth2 library. Currently we are making curl requests.
 - [ ] Find a better way to represent groups with multiple tank/healer roles.
