@@ -593,13 +593,15 @@ enum Cfg {
     UpdatePeriodIndex {
         #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
         region: Region,
+        #[structopt(help="Period index CSV file.", default_value = "data/static/period-index.csv", parse(from_os_str))]
+        file: path::PathBuf,
     },
 }
 
-// TODO: hard coded file name
-fn update_period_index(ctx: &Ctx, period_index: &json::PeriodIndex) -> Result<()> {
-
-    let path = path::PathBuf::from("data/static/period-index.csv");
+fn update_period_index(ctx: &Ctx,
+                       period_index: &json::PeriodIndex,
+                       path: path::PathBuf) -> Result<()>
+{
     if ! path.is_file() {
         error!("ERROR: Period index '{}' is not a file. Not updating.", path.display());
         return Ok(());
@@ -619,6 +621,8 @@ fn update_period_index(ctx: &Ctx, period_index: &json::PeriodIndex) -> Result<()
     }
 
     if indices.is_empty() {
+        println!("Period index file '{}' is up to date for {} region.",
+            path.display(), ctx.region.to_string());
         return Ok(());
     }
 
@@ -700,7 +704,7 @@ fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn run_update_period_index(region: Region) -> Result<()> {
+fn run_update_period_index(region: Region, file: path::PathBuf) -> Result<()> {
     let mut easy = Easy::new();
     let access_token = &token_request(&mut easy, region)?;
     let gctx = &Ctx {
@@ -709,7 +713,7 @@ fn run_update_period_index(region: Region) -> Result<()> {
         easy: RefCell::new(easy),
     };
     let period_index = query_period_index(gctx)?;
-    update_period_index(gctx, &period_index)?;
+    update_period_index(gctx, &period_index, file)?;
     Ok(())
 }
 
@@ -898,7 +902,7 @@ fn run() -> Result<()> {
     match Cfg::from_args() {
         Cfg::Dedup{paths} => run_dedup(paths)?,
         Cfg::Download(cmd) => run_download(cmd)?,
-        Cfg::UpdatePeriodIndex{region} => run_update_period_index(region)?,
+        Cfg::UpdatePeriodIndex{region, file} => run_update_period_index(region, file)?,
     }
 
     Ok(())
