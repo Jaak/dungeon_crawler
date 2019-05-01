@@ -446,6 +446,20 @@ fn write_to_vector(easy: &mut Easy) -> Result<Vec<u8>> {
     Ok(result)
 }
 
+#[derive(Debug, Clone)]
+struct TimeoutError;
+
+impl std::fmt::Display for TimeoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Timeout error")
+    }
+}
+
+impl error::Error for TimeoutError {
+    fn description(&self) -> &str { "Timeout" }
+    fn cause(&self) -> Option<&error::Error> { None }
+}
+
 fn query<T>(ctx: &Ctx, query: &str) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
@@ -464,14 +478,30 @@ where
     list.append(header_str)?;
     easy.http_headers(list)?;
 
-    let data = write_to_vector(&mut easy)?;
-    match serde_json::from_slice(data.as_slice()) {
-        Ok(json_value) => Ok(json_value),
-        Err(err) => {
-            error!("Failed to parse json string: {}", String::from_utf8(data)?);
-            Err(Box::new(err))
+    let timeout_msg = Vec::from("Timeout".as_bytes());
+    for i in 1 .. 10 {
+        let data = write_to_vector(&mut easy)?;
+        if data == timeout_msg {
+            error!("Timeout nr. {} of query \"{}\"", i, query_str);
+            continue;
+        }
+
+        match serde_json::from_slice(data.as_slice()) {
+            Ok(json_value) => {
+                if i > 1 {
+                    info!("Query \"{}\" that previously timed out is OK", query_str);
+                }
+
+                return Ok(json_value);
+            }
+            Err(err) => {
+                error!("Failed to parse json string: {}", String::from_utf8(data)?);
+                return Err(Box::new(err));
+            }
         }
     }
+
+    Err(Box::new(TimeoutError))
 }
 
 // Resulting token is just printed out to stdout.
