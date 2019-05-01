@@ -11,13 +11,10 @@ Cargo.lock
 
 .DS_Store
 .Rhistory
-*.csv
+/*.csv
 *.rds
-data/*.csv
-data/eu/
-data/us/
-data/kr/
-data/tw/
+data/season1/
+data/season2/
 
 .env
 
