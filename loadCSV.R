@@ -21,6 +21,16 @@ ReadPeriodIndex <- function() {
     return(result)
 }
 
+ReadDungeonTimeLimits <- function() {
+    colClasses <- c("factor","integer","integer", "integer")
+    result <- fread("data/static/dungeon-time-limits.csv",
+                    head=TRUE,
+                    sep=";",
+                    colClasses=colClasses,
+                    key=c("Dungeon", "PeriodStart", "PeriodEnd"))
+    return(result)
+}
+
 # Using column classes for more efficient representation and faster reading.
 # If this is slow for you can skip columns by marking the respective class as "NA".
 ReadCSVFile <- function(fname) {
@@ -44,6 +54,7 @@ ReadCSVFile <- function(fname) {
 
 DungeonInfo <- ReadDungeonInfo()
 PeriodIndex <- ReadPeriodIndex()
+DungeonTimeLimits <- ReadDungeonTimeLimits()
 
 Preprocess <- function(Tbl) {
     Tbl[, Timestamp2 := Timestamp]
@@ -61,12 +72,31 @@ Preprocess <- function(Tbl) {
 
     Tbl[,NumMelee:=NumFrostDk+NumUnholyDk+NumHavocDh+NumFeralDruid+NumSurvivalHunter+NumWindwalkerMonk+NumRetributionPaladin+NumAssassinationRogue+NumOutlawRogue+NumSubtletyRogue+NumEnhancementShaman+NumArmsWarrior+NumFuryWarrior]
     Tbl[,TimeMinutes:=Duration/60000]
-    Tbl[DungeonInfo, on='Dungeon', Success:=TimeMinutes<=TimeLimit]
+
+    Tbl[, PeriodId2 := PeriodId]
+    Tbl <- foverlaps(Tbl, DungeonTimeLimits,
+        by.x = c("Dungeon", "PeriodId", "PeriodId2"),
+        by.y = c("Dungeon", "PeriodStart", "PeriodEnd"),
+        type = "within",
+        mult = "first")
+    if (anyNA(Tbl$TimeLimit)) {
+        cat("WARNING! For some dungeons time limit is missing! Update dungeon-time-limits.csv file.")
+    }
+
+    Tbl[, PeriodId2 := NULL]
+    Tbl[, PeriodStart := NULL]
+    Tbl[, PeriodEnd := NULL]
+    Tbl[, Success:=TimeMinutes<=TimeLimit]
+    Tbl[, TimeLimit:=NULL]
+
     Tbl[, Datetime:=as.POSIXct(Timestamp/1000, origin="1970-01-01", tz="UTC")]
 
     # Remove few more redundant columns
     Tbl[,Timestamp:=NULL]
     Tbl[,Duration:=NULL]
+
+    # This is weird:
+    setcolorder(Tbl, c("Region", "PeriodId", "Faction", "Dungeon", "KeystoneLevel"))
     return(Tbl)
 }
 
