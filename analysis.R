@@ -117,7 +117,7 @@ RunDurationBoxplot <- function(Board) {
         guides(color=FALSE) +
         xlab("Dungeon") +
         ylab("Time (in minutes)") +
-        ggtitle ("Median run length of each dungeon (compared to time limit)")
+        ggtitle ("Median run length of +10 and higher dungeons (compared to time limit)")
 
     return (plot)
 }
@@ -249,8 +249,9 @@ RunsPerDay <- function(Board) {
     return (plot)
 }
 
-RunsPerWeek <- function(Board) {
-    Summ <- Board[KeystoneLevel == 10,
+RunsPerWeek <- function(Board, Level) {
+    Title <- paste0("Number of +", Level, " runs each week")
+    Summ <- Board[KeystoneLevel== Level,
         .(Count = .N,
           Week = min(floor_date(Datetime, "day"))),
         by=.(Success, WeekNr)]
@@ -259,7 +260,7 @@ RunsPerWeek <- function(Board) {
         scale_x_datetime() +
         xlab("Time") +
         ylab("Number of runs") +
-        ggtitle("Number of +10 keystones each week")
+        ggtitle(Title)
     return (plot)
 }
 
@@ -486,30 +487,42 @@ if (TRUE) {
     Indicators <- Indicators[SpecInfo, on = 'Spec']
     Indicators <- Indicators[! is.na(Indicator)]
 
+    MinLevel <- 15
+    Title <- paste0("Advantage to having spec in group for +", MinLevel, " and higher")
+
     Summ <- Indicators[,
-        Board[WeekNr == max(WeekNr) & KeystoneLevel >= 10,
-            .(Odds = sum(Success) / .N),
+        Board[WeekNr == max(WeekNr) & KeystoneLevel >= MinLevel,
+            .(Odds = sum(Success) / .N, Count = .N),
             by=.(Has = (get(Indicator) > 0))],
         keyby = .(Indicator)]
-    Summ <- dcast(Summ, ... ~ Has, value.var="Odds")
+    Summ <- dcast(Summ, ... ~ Has, value.var=c("Odds", "Count"))
     Summ <- Summ[Indicators, on = 'Indicator']
     Summ[, Indicator := NULL]
-    setnames(Summ, "TRUE", "OddsWith")
-    setnames(Summ, "FALSE", "OddsWithout")
+    setnames(Summ, "Odds_TRUE", "OddsWith")
+    setnames(Summ, "Odds_FALSE", "OddsWithout")
+    setnames(Summ, "Count_TRUE", "CountWith")
+    setnames(Summ, "Count_FALSE", "CountWithout")
 
+    # Odds ratio:
     # Summ[, Advantage := OddsWith / OddsWithout]
-    Summ[, Advantage := OddsWith - OddsWithout]
-
+    # Standard error for odds ratio is bit non-trivial to calculate
     # shift <- scales::trans_new("shift", transform = function(x) {x-1}, inverse = function(x) {x+1})
+
+    # Odds difference:
+    Summ[, Advantage := OddsWith - OddsWithout]
+    Summ[, SE := sqrt(OddsWith*(1 - OddsWith)/CountWith + OddsWithout*(1 - OddsWithout)/CountWithout)]
+
     plot <- ggplot(data=Summ, aes(x = reorder(Spec, Advantage), y = Advantage, fill = Spec)) +
         geom_bar(stat = "identity", colour="black", size = 0.1) +
+        geom_errorbar(aes(ymin = Advantage - 1.96*SE, ymax = Advantage + 1.96*SE), colour="black", size = 0.2, width = 0.8) +
+        geom_errorbar(aes(ymin = Advantage - 1.28*SE, ymax = Advantage + 1.28*SE), colour="black", size = 0.2, width = 0.4) +
         scale_x_discrete(labels = DpsShortNames) +
         # scale_y_continuous(trans = shift) +
         scale_fill_manual(values = SpecColors) +
         guides(fill=FALSE) +
         xlab(NULL) +
         ylab("Success chance difference") +
-        ggtitle("Advantage to having spec in group for +10 and higher") +
+        ggtitle(Title) +
         scale_y_continuous(labels = percent) +
         coord_flip()
 
@@ -542,8 +555,8 @@ if (TRUE) {
     cat(paste0("       Last run  ", LastTime, "\n"))
 
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
-    SavePlotAsPng("tank-precentage.png", TankPrecentage(Week))
-    SavePlotAsPng("healer-precentage.png", HealerPrecentage(Week))
+    # SavePlotAsPng("tank-precentage.png", TankPrecentage(Week))
+    # SavePlotAsPng("healer-precentage.png", HealerPrecentage(Week))
     SavePlotAsPng("success-by-dungeon-15.png", RunsByDungeon(Week, 10))
     SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week))
     SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
@@ -558,12 +571,12 @@ if (FALSE) {
     cat(paste0("       First run ", min(Board$Datetime), "\n"))
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
-    SavePlotAsPng("rogue-success.png", RogueSuccess(Board, 2))
+    # SavePlotAsPng("rogue-success.png", RogueSuccess(Board, 2))
     SavePlotAsPng("day-heatmap.png", DayHeatmap(Board))
     SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
     SavePlotAsPng("healers-season.png", HealerPrecentageOverTime(Board))
     SavePlotAsPng("tanks-season.png", TankPrecentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
-    SavePlotAsPng("10-runs-per-week.png", RunsPerWeek(Board))
+    SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 10))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
 }
