@@ -1,6 +1,7 @@
 Dungeon;PeriodStart;PeriodEnd;TimeLimit
 AtalDazar;0;1000;30
-Freehold;0;1000;36
+Freehold;0;703;36
+Freehold;704;1000;33
 TolDagor;0;1000;36
 TheMotherlode;0;1000;39
 WaycrestManor;0;1000;39
