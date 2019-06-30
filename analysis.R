@@ -3,6 +3,7 @@ library(ggplot2)
 library(viridis)
 library(scales)
 library(lubridate)
+library(zoo)
 
 ReadSpecInfo <- function() {
     colClasses <- c("factor","factor","factor")
@@ -99,6 +100,14 @@ DpsShortNames <- c(
     "FuryWarrior" = "Fury"
 )
 
+Season1EndDate <- as.POSIXct("2019-01-22 18:00:00")
+Patches <- c(
+    "8.1"   = as.POSIXct("2018-11-11 18:00:00"),
+    "8.1.5" = as.POSIXct("2019-03-12 18:00:00"),
+    "8.2"   = as.POSIXct("2019-06-25 18:00:00")
+)
+
+
 # print(AffixCombinations)
 # exit(1)
 
@@ -106,18 +115,19 @@ SavePlotAsPng <- function(name, plot) {
     ggsave(name, plot = plot, width = 7, height = 4, type = "quartz")
 }
 
-RunDurationBoxplot <- function(Board) {
+RunDurationBoxplot <- function(Board, L) {
+    Title <- paste0("Median run length of +", L, " (compared to time limit)")
     Tbl <- Board[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
-    Tbl <- Tbl[KeystoneLevel >= 10]
+    Tbl <- Tbl[KeystoneLevel == L]
     plot <- ggplot (Tbl, aes(x = reorder(Dungeon, TimeMinutes, median), y = TimeMinutes, color = Dungeon)) +
         stat_boxplot(geom ='errorbar', lwd=0.25) +
         geom_boxplot(lwd=0.25, outlier.size = 0.1) +
         geom_point(aes(x=Shorthand, y=TimeLimit, color=Shorthand), data = DungeonInfo, size = 2) +
-        scale_y_log10() +
+        scale_y_log10(breaks = c(20, 30, 40, 60, 120)) +
         guides(color=FALSE) +
         xlab("Dungeon") +
         ylab("Time (in minutes)") +
-        ggtitle ("Median run length of +10 and higher dungeons (compared to time limit)")
+        ggtitle (Title)
 
     return (plot)
 }
@@ -132,50 +142,15 @@ NumberOfRuns <- function(frame) {
     return (plot)
 }
 
-TankPrecentage <- function(Board) {
-    TankRuns <- Board[Tank != "",.(Count=.N), keyby=.(KeystoneLevel,Tank)]
-    TankRuns[, Percent := sum(Count), by=KeystoneLevel]
-    TankRuns[, Percent := Count/Percent]
-    KeyRange <- 2:max(TankRuns$KeystoneLevel)
-    plot <- ggplot(data=TankRuns,
-        aes(x=KeystoneLevel, y=Percent, color=Tank)) +
-        scale_color_manual(labels = TankShortNames, values = TankColors) +
-        geom_line() +
-        scale_x_continuous(
-            breaks=KeyRange[KeyRange %% 5 == 0],
-            minor_breaks=KeyRange) +
-        scale_y_continuous(labels = percent) +
-        # scale_fill_manual(values = TankColors, name = "Tank") +
-        # geom_area(position="fill") +
-        xlab("Keystone level") +
-        ylab("Percentage of tanks") +
-        ggtitle("Tanks by keystone level")
-    return (plot)
-}
-
-HealerPrecentage <- function(Board) {
-    HealerRuns <- Board[Healer != "",.(Count=.N), keyby=.(KeystoneLevel,Healer)]
-    HealerRuns[,Percent:=sum(Count),by=KeystoneLevel]
-    HealerRuns[,Percent:=Count/Percent]
-    KeyRange <- 2:max(HealerRuns$KeystoneLevel)
-    plot <- ggplot(data=HealerRuns, aes(x=KeystoneLevel, y=Percent, color=Healer)) +
-        geom_line() +
-        scale_color_manual(labels = HealerShortNames, values = HealerColors) +
-        scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
-        scale_y_continuous(labels = percent) +
-        xlab("Keystone level") +
-        ggtitle("Healers by keystone level")
-    return (plot)
-}
-
 RunsByDungeon <- function(Board, L) {
+    Title <- paste0("Number of +", L, " runs by dungeon")
     DungeonRuns <- Board[KeystoneLevel==L,.(Count=.N), keyby=.(Dungeon, Success)]
     # Not needed any more but here to remind myself of how to fill in missing values:
     # DungeonRuns <- DungeonRuns[CJ(Dungeon, Success, unique=TRUE)][is.na(Count), Count := 0]
     DungeonRuns <- DungeonRuns[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
     plot <- ggplot(DungeonRuns, aes(y=Count, x=reorder(Dungeon,-Count,sum), fill=Success)) +
         geom_bar(stat="identity") +
-        ggtitle(paste0("Number of +", L, " runs by dungeon")) +
+        ggtitle(Title) +
         xlab("Dungeon")
     return (plot)
 }
@@ -240,6 +215,7 @@ DayAverageHeatmap <- function(Board) {
 RunsPerDay <- function(Board) {
     Tbl <- Board[, .(Count = .N, Day = floor_date(first(Datetime), "day")), by=.(DayNr)]
     plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color = wday(Day, label = TRUE))) +
+        geom_vline(xintercept = Season1EndDate, size = 0.25) +
         geom_point() +
         xlab("Time") +
         ylab("Number of runs") +
@@ -251,53 +227,19 @@ RunsPerDay <- function(Board) {
 
 RunsPerWeek <- function(Board, Level) {
     Title <- paste0("Number of +", Level, " runs each week")
-    Summ <- Board[KeystoneLevel== Level,
+    Summ <- Board[KeystoneLevel == Level,
         .(Count = .N,
           Week = min(floor_date(Datetime, "day"))),
-        by=.(Success, WeekNr)]
+        keyby=.(Success, WeekNr)]
+    # Summ[, Week := factor(Week)]
+    # print(Summ)
     plot <- ggplot(data=Summ, aes(x = Week, y = Count, fill = Success)) +
-        geom_bar(stat="identity") +
-        scale_x_datetime() +
+        geom_vline(xintercept = Season1EndDate, size = 0.25) +
+        geom_bar(stat="identity", width = 500000) +
+        scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
         xlab("Time") +
         ylab("Number of runs") +
         ggtitle(Title)
-    return (plot)
-}
-
-TankPrecentageOverTime <- function(Board) {
-    Summ <- Board[
-        Tank != "",
-        .(Count=.N, Day = floor_date(first(Datetime), "day")),
-        keyby=.(Tank, DayNr)]
-    Summ[, Percent := sum(Count), by=DayNr]
-    Summ[, Percent := Count/Percent]
-    plot <- ggplot(data=Summ,
-        aes(x=Day, y=Percent, color=Tank)) +
-        scale_color_manual(labels = TankShortNames, values = TankColors) +
-        geom_line() +
-        scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
-        scale_y_continuous(labels = percent) +
-        xlab("Time") +
-        ylab("Frequency") +
-        ggtitle("Tank popularity over time")
-    return (plot)
-}
-
-HealerPrecentageOverTime <- function(Board) {
-    Summ <- Board[
-        Healer != "",
-        .(Count=.N, Day = floor_date(first(Datetime), "day")),
-        keyby=.(Healer, DayNr)]
-    Summ[, Percent:=sum(Count), by=DayNr]
-    Summ[, Percent:=Count/Percent]
-    plot <- ggplot(data=Summ, aes(x=Day, y=Percent, color=Healer)) +
-        geom_line() +
-        scale_color_manual(labels = HealerShortNames, values = HealerColors) +
-        scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
-        scale_y_continuous(labels = percent) +
-        xlab("Time") +
-        ylab("Frequency") +
-        ggtitle("Healer popularity over time")
     return (plot)
 }
 
@@ -311,28 +253,12 @@ AvgKeystonePerDay <- function(Board) {
     Tbl <- Tbl[AffixInfo, on = 'PeriodId']
     Tbl <- Tbl[! is.na(Day)]
     plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix3, shape=Affix2)) +
+        geom_vline(xintercept = Season1EndDate, size = 0.25) +
         geom_point() +
         xlab("Time") +
         ylab("Keystone level") +
         scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
         ggtitle("Average keystone level (completed in time)")
-    return (plot)
-}
-
-RogueSuccess <- function(Board, MinKeystoneLevel) {
-    Board[, HasRogue := (NumAssassinationRogue + NumOutlawRogue + NumSubtletyRogue) > 0]
-    Summ <- Board[
-        NumMelee <= 3 & KeystoneLevel >= MinKeystoneLevel & KeystoneLevel < 23,
-        .(Percent=sum(Success) / .N),
-        keyby=.(KeystoneLevel,HasRogue)]
-    KeyRange <- 2:max(Summ$KeystoneLevel)
-    plot <- ggplot(data=Summ, aes(x=KeystoneLevel, y=Percent, color=HasRogue)) +
-        geom_line() +
-        scale_x_continuous(breaks=KeyRange[KeyRange %% 5 == 0], minor_breaks=KeyRange) +
-        scale_y_continuous(labels = percent) +
-        xlab("Keystone level") +
-        ylab("Success rate") +
-        ggtitle("Average success rate depending on rogue")
     return (plot)
 }
 
@@ -344,6 +270,217 @@ RunsByKeystoneLevel <- function(Board) {
         xlab("Keystone level") +
         ylab("Number of runs")
     return(plot)
+}
+
+AddDefaultDatetimeAxis <- function(p) {
+    return (
+        p +
+        geom_vline(xintercept = Patches, size = 0.25, linetype = "dashed") +
+        geom_vline(xintercept = Season1EndDate, size = 0.25) +
+        scale_x_datetime(
+            breaks = date_breaks("1 month"),
+            date_labels = "%b",
+            sec.axis = dup_axis(
+                breaks = Patches,
+                labels = names(Patches)
+            )
+        ) +
+        theme(axis.title.x = element_blank())
+    )
+}
+
+TankPercentageOverTime <- function(Board, smooth = FALSE) {
+    Summ <- Board[
+        Tank != "",
+        .(Count=.N, Day = mean(Datetime)),
+        keyby=.(Tank, DayNr)]
+    Summ[, Percent := sum(Count), by=DayNr]
+    Summ[, Percent := Count/Percent]
+
+    Summ[, SizeType := "Small"]
+    Summ[, ColorType := Tank]
+    Summ$Group <- 2*rank(Summ$Tank, ties.method="min") + 1
+    Summ[, Tank := NULL]
+
+    if (smooth) {
+        Summ[, Percent := rollmean(Percent, 7, fill = NA), by=.(Group)]
+        Summ <- na.omit(Summ, cols="Percent")
+    }
+
+    Black <- copy(Summ)
+    Black[, ColorType := "Black"]
+    Black[, SizeType := "Mid"]
+    Black[, Group := Group - 1]
+
+    Summ <- funion(Black, Summ)
+
+    plot <- ggplot(data=Summ, aes(x=Day, y=Percent, group=Group, color=ColorType, size=SizeType))
+    plot <- AddDefaultDatetimeAxis(plot) +
+        geom_line() +
+        scale_size_manual(values = c("Mid" = 1.0, "Small" = 0.8)) +
+        scale_color_manual(
+            breaks = c(NA, names(TankShortNames)),
+            labels = c("Black" = NA, TankShortNames),
+            values = c("Black" = "#000000", TankColors)) +
+        scale_y_continuous(labels = percent) +
+        guides(size = "none", color = guide_legend("Tank")) +
+        ylab("Frequency") +
+        ggtitle("Tank popularity over time")
+    return (plot)
+}
+
+HealerPercentageOverTime <- function(Board, smooth = FALSE) {
+
+    # Aggregate:
+    Summ <- Board[
+        Healer != "",
+        .(Count=.N, Day = floor_date(first(Datetime), "day")),
+        keyby=.(Healer, DayNr)]
+    Summ[, Percent:=sum(Count), by=DayNr]
+    Summ[, Percent:=Count/Percent]
+
+    # Following is for drawing lines that have black outline.
+    # Also achieves effect that outlined lines are drawn one after another
+    Summ[, SizeType := "Small"]
+    Summ[, ColorType := Healer]
+    Summ$Group <- 2*rank(Summ$Healer, ties.method="min") + 1
+    Summ[, Healer := NULL]
+
+    if (smooth) {
+        Summ[, Percent := rollmean(Percent, 7, fill = NA), by=.(Group)]
+        Summ <- na.omit(Summ, cols="Percent")
+    }
+
+    # Black line is drawn bigger and before each colored line!
+    Black <- copy(Summ)
+    Black[, ColorType := "Black"]
+    Black[, SizeType := "Mid"]
+    Black[, Group := Group - 1]
+
+    Summ <- funion(Black, Summ)
+
+    plot <- ggplot(data=Summ, aes(x=Day, y=Percent, group=Group, color=ColorType, size=SizeType));
+    plot <- AddDefaultDatetimeAxis(plot) +
+        geom_line() +
+        scale_size_manual(values = c("Mid" = 1.0, "Small" = 0.8)) +
+        scale_color_manual(
+            breaks = c(NA, names(HealerShortNames)),
+            labels = c("Black" = NA, HealerShortNames),
+            values = c("Black" = "#000000", HealerColors)) +
+        scale_y_continuous(labels = percent) +
+        guides(size = "none", color = guide_legend("Healer")) +
+        ylab("Frequency") +
+        ggtitle("Healer popularity over time")
+    return (plot)
+}
+
+DpsPercentageOverTime <- function(Board, smooth = FALSE) {
+    Indicators <- data.table(
+        Indicator = c("NumFrostDk", "NumUnholyDk", "NumHavocDh", "NumBalanceDruid", "NumFeralDruid", "NumBeastMasterHunter", "NumMarksmanshipHunter", "NumSurvivalHunter", "NumArcaneMage", "NumFireMage", "NumFrostMage", "NumWindwalkerMonk", "NumRetributionPaladin", "NumShadowPriest", "NumAssassinationRogue", "NumOutlawRogue", "NumSubtletyRogue", "NumElementalShaman", "NumEnhancementShaman", "NumAfflictionWarlock", "NumDemonologyWarlock", "NumDestructionWarlock", "NumArmsWarrior", "NumFuryWarrior"),
+        Spec = c("FrostDk", "UnholyDk", "HavocDh", "BalanceDruid", "FeralDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "WindwalkerMonk", "RetributionPaladin", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior")
+    )
+
+    Indicators <- Indicators[SpecInfo, on = 'Spec']
+    Indicators <- Indicators[! is.na(Indicator)]
+
+    Tbl <- Board[Success == TRUE]
+    setorder(Tbl, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
+    Tbl <- Tbl[, .SD[, .SD[.I < .N / 20]], by = .(Dungeon, DayNr)]
+
+    # TODO: super slow join:
+    # Tbl <- Board[KeystoneLevel >= 1]
+    Summ <- Indicators[,
+        Tbl[,
+            .(Percent = sum(get(Indicator) > 0) / .N,
+              # Count = .N,
+              Spec = Spec,
+              Day = median(Datetime)),
+            by=.(DayNr)],
+        by = .(Indicator)]
+
+    # Following is for drawing lines that have black outline.
+    # Also achieves effect that outlined lines are drawn one after another
+    Summ[, SizeType := "Small"]
+    Summ[, ColorType := Spec]
+    Summ$Group <- 2*rank(Summ$Spec, ties.method="min") + 1
+    Summ[, Spec := NULL]
+
+    if (smooth) {
+        Summ[, Percent := rollmean(Percent, 7, fill = NA), by=.(Group)]
+        Summ <- na.omit(Summ, cols="Percent")
+    }
+
+    # Black line is drawn bigger and before each colored line!
+    Black <- copy(Summ)
+    Black[, ColorType := "Black"]
+    Black[, SizeType := "Mid"]
+    Black[, Group := Group - 1]
+
+    Summ <- funion(Black, Summ)
+
+    plot <- ggplot(data=Summ, aes(x=Day, y=Percent, group=Group, color=ColorType, size=SizeType))
+    plot <- AddDefaultDatetimeAxis(plot) +
+        geom_line() +
+        scale_size_manual(values = c("Mid" = 1.0, "Small" = 0.8)) +
+        scale_color_manual(values = c("Black" = "#000000", SpecColors)) +
+        scale_y_continuous(labels = percent) +
+        ylab("Proportion of runs with spec present") +
+        ggtitle("DPS spec popularity over time (top 5% of runs)") +
+        theme(legend.position="none")
+    return (plot)
+}
+
+# For each spec plot the success chance difference
+# between having spec in the group vs not having it.
+DpsSpecAdvantage <- function(Board, MinLevel) {
+    # Ugh, workaround for poor naming decisions...
+    Indicators <- data.table(
+        Indicator = c("NumFrostDk", "NumUnholyDk", "NumHavocDh", "NumBalanceDruid", "NumFeralDruid", "NumBeastMasterHunter", "NumMarksmanshipHunter", "NumSurvivalHunter", "NumArcaneMage", "NumFireMage", "NumFrostMage", "NumWindwalkerMonk", "NumRetributionPaladin", "NumShadowPriest", "NumAssassinationRogue", "NumOutlawRogue", "NumSubtletyRogue", "NumElementalShaman", "NumEnhancementShaman", "NumAfflictionWarlock", "NumDemonologyWarlock", "NumDestructionWarlock", "NumArmsWarrior", "NumFuryWarrior"),
+        Spec = c("FrostDk", "UnholyDk", "HavocDh", "BalanceDruid", "FeralDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "WindwalkerMonk", "RetributionPaladin", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior")
+    )
+
+    Indicators <- Indicators[SpecInfo, on = 'Spec']
+    Indicators <- Indicators[! is.na(Indicator)]
+
+    Title <- paste0("Advantage to having spec in group for +", MinLevel, " and higher")
+
+    Summ <- Indicators[,
+        Board[KeystoneLevel >= MinLevel,
+            .(Odds = sum(Success) / .N, Count = .N),
+            by=.(Has = (get(Indicator) > 0))],
+        keyby = .(Indicator)]
+    Summ <- dcast(Summ, ... ~ Has, value.var=c("Odds", "Count"))
+    Summ <- Summ[Indicators, on = 'Indicator']
+    Summ[, Indicator := NULL]
+    setnames(Summ, "Odds_TRUE", "OddsWith")
+    setnames(Summ, "Odds_FALSE", "OddsWithout")
+    setnames(Summ, "Count_TRUE", "CountWith")
+    setnames(Summ, "Count_FALSE", "CountWithout")
+
+    # Odds ratio:
+    # Summ[, Advantage := OddsWith / OddsWithout]
+    # Standard error for odds ratio is bit non-trivial to calculate
+    # shift <- scales::trans_new("shift", transform = function(x) {x-1}, inverse = function(x) {x+1})
+
+    # Odds difference:
+    Summ[, Advantage := OddsWith - OddsWithout]
+    Summ[, SE := sqrt(OddsWith*(1 - OddsWith)/CountWith + OddsWithout*(1 - OddsWithout)/CountWithout)]
+
+    plot <- ggplot(data=Summ, aes(x = reorder(Spec, Advantage), y = Advantage, fill = Spec)) +
+        geom_bar(stat = "identity", colour="black", size = 0.1) +
+        geom_errorbar(aes(ymin = Advantage - 1.96*SE, ymax = Advantage + 1.96*SE), colour="black", size = 0.2, width = 0.8) +
+        geom_errorbar(aes(ymin = Advantage - 1.28*SE, ymax = Advantage + 1.28*SE), colour="black", size = 0.2, width = 0.4) +
+        scale_x_discrete(labels = DpsShortNames) +
+        # scale_y_continuous(trans = shift) +
+        scale_fill_manual(values = SpecColors) +
+        guides(fill=FALSE) +
+        xlab(NULL) +
+        ylab("Success chance difference") +
+        ggtitle(Title) +
+        scale_y_continuous(labels = percent) +
+        coord_flip()
+
+    return (plot)
 }
 
 AnimateRunCount <- function(Board) {
@@ -459,77 +596,6 @@ if (TRUE) {
 }
 
 #
-# Working on some ideas:
-#
-
-if (FALSE) {
-    Board[DungeonInfo, on='Dungeon',
-        Score := (1.08 ^ (KeystoneLevel - 1))*(TimeMinutes/TimeLimit)]
-    # log(Score) = (KeystoneLevel - 1)*log(1.08)) + log(TimeMinutes) - log(TimeLimit)
-    plot <- ggplot(data=Board, aes(x = log(Score), color = Success)) +
-        geom_density()
-
-    SavePlotAsPng("test.png", plot)
-
-    stop("ohno")
-}
-
-#
-# Correlating with specs:
-#
-
-if (TRUE) {
-    Indicators <- data.table(
-        Indicator = c("NumFrostDk", "NumUnholyDk", "NumHavocDh", "NumBalanceDruid", "NumFeralDruid", "NumBeastMasterHunter", "NumMarksmanshipHunter", "NumSurvivalHunter", "NumArcaneMage", "NumFireMage", "NumFrostMage", "NumWindwalkerMonk", "NumRetributionPaladin", "NumShadowPriest", "NumAssassinationRogue", "NumOutlawRogue", "NumSubtletyRogue", "NumElementalShaman", "NumEnhancementShaman", "NumAfflictionWarlock", "NumDemonologyWarlock", "NumDestructionWarlock", "NumArmsWarrior", "NumFuryWarrior"),
-        Spec = c("FrostDk", "UnholyDk", "HavocDh", "BalanceDruid", "FeralDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "WindwalkerMonk", "RetributionPaladin", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior")
-    )
-
-    Indicators <- Indicators[SpecInfo, on = 'Spec']
-    Indicators <- Indicators[! is.na(Indicator)]
-
-    MinLevel <- 15
-    Title <- paste0("Advantage to having spec in group for +", MinLevel, " and higher")
-
-    Summ <- Indicators[,
-        Board[WeekNr == max(WeekNr) & KeystoneLevel >= MinLevel,
-            .(Odds = sum(Success) / .N, Count = .N),
-            by=.(Has = (get(Indicator) > 0))],
-        keyby = .(Indicator)]
-    Summ <- dcast(Summ, ... ~ Has, value.var=c("Odds", "Count"))
-    Summ <- Summ[Indicators, on = 'Indicator']
-    Summ[, Indicator := NULL]
-    setnames(Summ, "Odds_TRUE", "OddsWith")
-    setnames(Summ, "Odds_FALSE", "OddsWithout")
-    setnames(Summ, "Count_TRUE", "CountWith")
-    setnames(Summ, "Count_FALSE", "CountWithout")
-
-    # Odds ratio:
-    # Summ[, Advantage := OddsWith / OddsWithout]
-    # Standard error for odds ratio is bit non-trivial to calculate
-    # shift <- scales::trans_new("shift", transform = function(x) {x-1}, inverse = function(x) {x+1})
-
-    # Odds difference:
-    Summ[, Advantage := OddsWith - OddsWithout]
-    Summ[, SE := sqrt(OddsWith*(1 - OddsWith)/CountWith + OddsWithout*(1 - OddsWithout)/CountWithout)]
-
-    plot <- ggplot(data=Summ, aes(x = reorder(Spec, Advantage), y = Advantage, fill = Spec)) +
-        geom_bar(stat = "identity", colour="black", size = 0.1) +
-        geom_errorbar(aes(ymin = Advantage - 1.96*SE, ymax = Advantage + 1.96*SE), colour="black", size = 0.2, width = 0.8) +
-        geom_errorbar(aes(ymin = Advantage - 1.28*SE, ymax = Advantage + 1.28*SE), colour="black", size = 0.2, width = 0.4) +
-        scale_x_discrete(labels = DpsShortNames) +
-        # scale_y_continuous(trans = shift) +
-        scale_fill_manual(values = SpecColors) +
-        guides(fill=FALSE) +
-        xlab(NULL) +
-        ylab("Success chance difference") +
-        ggtitle(Title) +
-        scale_y_continuous(labels = percent) +
-        coord_flip()
-
-    SavePlotAsPng("advantage.png", plot)
-}
-
-#
 # Animations:
 #
 
@@ -541,13 +607,22 @@ if (FALSE) {
 }
 
 #
-# Bunch of graphs:
+# Bunch of graphs for specific weeks:
 #
 
-if (TRUE) {
+if (FALSE) {
+    # Season 1:
     # Week <- Board[WeekNr == 11] # worst week
     # Week <- Board[WeekNr == 14] # best week
+
+    # Season 2:
+    # WeekNr == 41 is 2019-06-12
+    # Week <- Board[WeekNr == 33] # in memory of bursting quaking
+    # Week <- Board[WeekNr == 34] # best week raging volcanic
+    # Week <- Board[WeekNr == 35] # teeming explosive as comparison to previous season worst
+
     Week <- Board[WeekNr == max(WeekNr)] # latest week
+
     FirstTime <- min(Week$Datetime)
     LastTime <- max(Week$Datetime)
     cat("    Plotting statistics of a week.\n")
@@ -555,28 +630,28 @@ if (TRUE) {
     cat(paste0("       Last run  ", LastTime, "\n"))
 
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
-    # SavePlotAsPng("tank-precentage.png", TankPrecentage(Week))
-    # SavePlotAsPng("healer-precentage.png", HealerPrecentage(Week))
-    SavePlotAsPng("success-by-dungeon-15.png", RunsByDungeon(Week, 10))
-    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week))
+    SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 15))
+    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 15))
     SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
+    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 15))
 }
 
 #
 # Summary data across entire timespan of M+:
 #
 
-if (FALSE) {
+if (TRUE) {
     cat("    Plotting statistics of entire time period.\n")
     cat(paste0("       First run ", min(Board$Datetime), "\n"))
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
-    # SavePlotAsPng("rogue-success.png", RogueSuccess(Board, 2))
-    SavePlotAsPng("day-heatmap.png", DayHeatmap(Board))
-    SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
-    SavePlotAsPng("healers-season.png", HealerPrecentageOverTime(Board))
-    SavePlotAsPng("tanks-season.png", TankPrecentageOverTime(Board))
+    SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, smooth = TRUE))
+    # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board))
+    # SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
+    SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board))
+    SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
-    SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 10))
+    SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
+    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Board, 15))
 }
