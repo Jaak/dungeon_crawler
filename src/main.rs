@@ -594,14 +594,21 @@ fn query_period(ctx: &Ctx, id: u32) -> Result<json::Period> {
 struct DownloadCmd {
     #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
     region: Region,
+
     #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
     workers: usize,
+
     #[structopt(long, default_value = "10", help="Request rate limit (per second).")]
     rate: f32,
+
     #[structopt(long, help="Time period ID. Use latest time period as default.")]
     period: Option<u32>,
+
     #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
     output: Option<path::PathBuf>,
+
+    #[structopt(help="Period index CSV file.", default_value = "data/static/period-index.csv", parse(from_os_str))]
+    period_index_file: path::PathBuf,
 }
 
 #[derive(StructOpt)]
@@ -614,17 +621,11 @@ struct DownloadCmd {
 enum Cfg {
     #[structopt(name = "download", about = "Download leaderboard data for a given week")]
     Download(DownloadCmd),
+
     #[structopt(name = "dedup", about = "Deduplicate a CSV file rows")]
     Dedup {
         #[structopt(help="CSV files to deduplicate.", parse(from_os_str))]
         paths: Vec<path::PathBuf>,
-    },
-    #[structopt(name = "update-period-index", about = "Updates period index for given region")]
-    UpdatePeriodIndex {
-        #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
-        region: Region,
-        #[structopt(help="Period index CSV file.", default_value = "data/static/period-index.csv", parse(from_os_str))]
-        file: path::PathBuf,
     },
 }
 
@@ -651,10 +652,12 @@ fn update_period_index(ctx: &Ctx,
     }
 
     if indices.is_empty() {
-        println!("Period index file '{}' is up to date for {} region.",
-            path.display(), ctx.region.to_string());
+        info!("Period index file '{}' is up to date for {} region.",
+              path.display(), ctx.region.to_string());
         return Ok(());
     }
+
+    info!("Updating period index '{}' for {} region.", path.display(), ctx.region.to_string());
 
     let file = fs::OpenOptions::new()
         .append(true).write(true).create(false).open(&path)?;
@@ -734,24 +737,11 @@ fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn run_update_period_index(region: Region, file: path::PathBuf) -> Result<()> {
-    let mut easy = Easy::new();
-    let access_token = &token_request(&mut easy, region)?;
-    let gctx = &Ctx {
-        access_token: access_token.access_token.clone(),
-        region: region,
-        easy: RefCell::new(easy),
-    };
-    let period_index = query_period_index(gctx)?;
-    update_period_index(gctx, &period_index, file)?;
-    Ok(())
-}
-
 fn run_download(cmd: DownloadCmd) -> Result<()> {
 
     info!("Requesting token...");
     let mut easy = Easy::new();
-    let DownloadCmd{region, workers, rate, period, output} = cmd;
+    let DownloadCmd{region, workers, rate, period, output, period_index_file} = cmd;
     let access_token = &token_request(&mut easy, region)?;
 
     // Global context
@@ -762,6 +752,7 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
     };
 
     // Query period ID index (TODO: cache this based on the latest time range)
+    info!("query_period_index()...");
     let period_index = query_period_index(gctx)?;
     let period_id = match period {
         None => period_index.current_period.id,
@@ -774,6 +765,8 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
             id
         }
     };
+
+    update_period_index(gctx, &period_index, period_index_file)?;
 
     info!("Querying period info (period_id = {})", period_id);
     let period_info = query_period(gctx, period_id)?;
@@ -932,7 +925,6 @@ fn run() -> Result<()> {
     match Cfg::from_args() {
         Cfg::Dedup{paths} => run_dedup(paths)?,
         Cfg::Download(cmd) => run_download(cmd)?,
-        Cfg::UpdatePeriodIndex{region, file} => run_update_period_index(region, file)?,
     }
 
     Ok(())
