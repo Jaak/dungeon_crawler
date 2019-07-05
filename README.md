@@ -2,6 +2,8 @@
 
 Download WoW Mythic+ leaderboard data and analyse it. Work in progress!
 
+![Tank popularity over time](https://raw.github.com/Jaak/dungeon_crawler/master/img/tanks-example.png)
+
 Using rust to invoke Blizzard API to download leaderboard data and R to draw
 pretty pictures from it.
 
