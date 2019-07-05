@@ -1,6 +1,6 @@
 # Dungeon Crawler
 
-Download WoW leaderboard data and analyse it. Work in progress!
+Download WoW Mythic+ leaderboard data and analyse it. Work in progress!
 
 Using rust to invoke Blizzard API to download leaderboard data and R to draw
 pretty pictures from it.
@@ -51,15 +51,18 @@ During preprocessing we remove duplicate entries, convert timestamps to a more u
 
 The `analysis.R` file is very much intended to be modified! In general drawing of each plot has been split into a different function. Scroll all the way down to bottom to see what functionality I have played around with in the past.
 
+The project makes extensive use of `data.table` library. It's very performant but unfortunately inserting new data is slow.
+
 ## TODO
 
 - [x] Command line parameters (week, region).
 - [x] ~~Support chinese realms.~~ Turns out the API for CN is not available.
 - [x] Timebox dungeon time limits.
-- [ ] Time series analysis (using timestamps attached to data).
 - [ ] Use proper OAuth2 library. Currently we are making curl requests.
 - [ ] Find a better way to represent groups with multiple tank/healer roles.
 - [ ] Correlate data with affixes.
+
+Item level analysis is currently beyond the scope of this project.
 
 ## License
 
