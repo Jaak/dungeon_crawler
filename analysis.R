@@ -102,9 +102,9 @@ DpsShortNames <- c(
 
 Season1EndDate <- as.POSIXct("2019-01-22 18:00:00")
 Patches <- c(
-    "8.1"   = as.POSIXct("2018-11-11 18:00:00"),
-    "8.1.5" = as.POSIXct("2019-03-12 18:00:00"),
-    "8.2"   = as.POSIXct("2019-06-25 18:00:00")
+    "8.1"   = as.POSIXct("2018-11-12 04:00:00"),
+    "8.1.5" = as.POSIXct("2019-03-13 04:00:00"),
+    "8.2"   = as.POSIXct("2019-06-26 04:00:00")
 )
 
 
@@ -214,13 +214,11 @@ DayAverageHeatmap <- function(Board) {
 
 RunsPerDay <- function(Board) {
     Tbl <- Board[, .(Count = .N, Day = floor_date(first(Datetime), "day")), by=.(DayNr)]
-    plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color = wday(Day, label = TRUE))) +
-        geom_vline(xintercept = Season1EndDate, size = 0.25) +
+    plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color = wday(Day, label = TRUE)))
+    plot <- AddDefaultDatetimeAxis(plot) +
         geom_point() +
-        xlab("Time") +
         ylab("Number of runs") +
         labs(color="Day") +
-        scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
         ggtitle("Number of daily runs over time")
     return (plot)
 }
@@ -252,12 +250,10 @@ AvgKeystonePerDay <- function(Board) {
         by=.(DayNr)]
     Tbl <- Tbl[AffixInfo, on = 'PeriodId']
     Tbl <- Tbl[! is.na(Day)]
-    plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix3, shape=Affix2)) +
-        geom_vline(xintercept = Season1EndDate, size = 0.25) +
+    plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix3, shape=Affix2))
+    plot <- AddDefaultDatetimeAxis(plot) +
         geom_point() +
-        xlab("Time") +
         ylab("Keystone level") +
-        scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
         ggtitle("Average keystone level (completed in time)")
     return (plot)
 }
@@ -383,9 +379,12 @@ DpsPercentageOverTime <- function(Board, smooth = FALSE) {
     Indicators <- Indicators[SpecInfo, on = 'Spec']
     Indicators <- Indicators[! is.na(Indicator)]
 
-    Tbl <- Board[Success == TRUE]
-    setorder(Tbl, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
-    Tbl <- Tbl[, .SD[, .SD[.I < .N / 20]], by = .(Dungeon, DayNr)]
+    Tbl <- Board
+    if (TRUE) {
+        Tbl <- Tbl[Success == TRUE]
+        setorder(Tbl, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
+        Tbl <- Tbl[, .SD[, .SD[.I < .N / 20]], by = .(Dungeon, DayNr)]
+    }
 
     # TODO: super slow join:
     # Tbl <- Board[KeystoneLevel >= 1]
