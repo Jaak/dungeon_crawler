@@ -49,7 +49,6 @@ struct Ctx {
 
 type Result<T> = std::result::Result<T, Box<error::Error + Send + Sync>>;
 
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 enum TankSpecialization {
     ProtectionPaladin = 1,
@@ -60,7 +59,6 @@ enum TankSpecialization {
     BrewmasterMonk,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 enum HealerSpecialization {
     RestorationDruid = 1,
@@ -71,7 +69,6 @@ enum HealerSpecialization {
     RestorationShaman,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, PartialOrd)]
 enum Region {
     Eu = 1,
@@ -130,7 +127,6 @@ impl FromStr for Region {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone, Debug, Serialize)]
 enum Dungeon {
     AtalDazar = 1,
@@ -172,7 +168,6 @@ impl FromStr for Dungeon {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 enum Faction {
     ALLIANCE = 1,
@@ -186,7 +181,6 @@ assert_eq_size!(enum_size_3; Option<Region>, Region);
 assert_eq_size!(enum_size_4; Option<Dungeon>, Dungeon);
 assert_eq_size!(enum_size_5; Option<Faction>, Faction);
 
-#[allow(dead_code)]
 #[serde(rename_all = "PascalCase")]
 #[derive(Default, Debug, Serialize)]
 struct DataRow {
@@ -682,6 +676,7 @@ fn update_period_index(ctx: &Ctx,
 // The file in given path will be overwritten by deduplicated file.
 // Note that with a low probability the result may still have some
 // duplicate rows.
+// TODO: deduplication should happen automatically when extending an CSV file!
 fn dedup_rows(path: path::PathBuf) -> Result<()> {
     let file = File::open(&path)?;
     // NOTE: Lock will be released when the file handle is closed
