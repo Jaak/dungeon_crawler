@@ -370,7 +370,7 @@ HealerPercentageOverTime <- function(Board, smooth = FALSE) {
     return (plot)
 }
 
-DpsPercentageOverTime <- function(Board, smooth = FALSE) {
+DpsPercentageOverTime <- function(Board, top = NULL, smooth = FALSE, discard = NULL) {
     Indicators <- data.table(
         Indicator = c("NumFrostDk", "NumUnholyDk", "NumHavocDh", "NumBalanceDruid", "NumFeralDruid", "NumBeastMasterHunter", "NumMarksmanshipHunter", "NumSurvivalHunter", "NumArcaneMage", "NumFireMage", "NumFrostMage", "NumWindwalkerMonk", "NumRetributionPaladin", "NumShadowPriest", "NumAssassinationRogue", "NumOutlawRogue", "NumSubtletyRogue", "NumElementalShaman", "NumEnhancementShaman", "NumAfflictionWarlock", "NumDemonologyWarlock", "NumDestructionWarlock", "NumArmsWarrior", "NumFuryWarrior"),
         Spec = c("FrostDk", "UnholyDk", "HavocDh", "BalanceDruid", "FeralDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "WindwalkerMonk", "RetributionPaladin", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior")
@@ -380,14 +380,15 @@ DpsPercentageOverTime <- function(Board, smooth = FALSE) {
     Indicators <- Indicators[! is.na(Indicator)]
 
     Tbl <- Board
-    if (TRUE) {
+    Title <- "DPS spec popularity over time"
+    if (! is.null(top)) {
         Tbl <- Tbl[Success == TRUE]
         setorder(Tbl, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
-        Tbl <- Tbl[, .SD[, .SD[.I < .N / 20]], by = .(Dungeon, DayNr)]
+        Tbl <- Tbl[, .SD[, .SD[.I < .N * top]], by = .(Dungeon, DayNr)]
+        Title <- paste0(Title, " (top ", round(100*top), "% of runs)")
     }
 
     # TODO: super slow join:
-    # Tbl <- Board[KeystoneLevel >= 1]
     Summ <- Indicators[,
         Tbl[,
             .(Percent = sum(get(Indicator) > 0) / .N,
@@ -396,6 +397,12 @@ DpsPercentageOverTime <- function(Board, smooth = FALSE) {
               Day = median(Datetime)),
             by=.(DayNr)],
         by = .(Indicator)]
+
+    if (! is.null(discard)) {
+        Summ[, Discard := mean(Percent < 0.1), by = .(Spec)]
+        Summ <- Summ[Discard < discard]
+        Summ[, Discard := NULL]
+    }
 
     # Following is for drawing lines that have black outline.
     # Also achieves effect that outlined lines are drawn one after another
@@ -424,7 +431,7 @@ DpsPercentageOverTime <- function(Board, smooth = FALSE) {
         scale_color_manual(values = c("Black" = "#000000", SpecColors)) +
         scale_y_continuous(labels = percent) +
         ylab("Proportion of runs with spec present") +
-        ggtitle("DPS spec popularity over time (top 5% of runs)") +
+        ggtitle(Title) +
         theme(legend.position="none")
     return (plot)
 }
@@ -609,7 +616,7 @@ if (FALSE) {
 # Bunch of graphs for specific weeks:
 #
 
-if (FALSE) {
+if (TRUE) {
     # Season 1:
     # Week <- Board[WeekNr == 11] # worst week
     # Week <- Board[WeekNr == 14] # best week
@@ -629,10 +636,10 @@ if (FALSE) {
     cat(paste0("       Last run  ", LastTime, "\n"))
 
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
-    SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 15))
-    SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 15))
+    SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 10))
+    # SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 10))
     SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
-    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 15))
+    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 10))
 }
 
 #
@@ -644,7 +651,7 @@ if (TRUE) {
     cat(paste0("       First run ", min(Board$Datetime), "\n"))
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
-    SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, smooth = TRUE))
+    SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, top = 0.8))
     # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board))
     # SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
     SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board))
@@ -652,5 +659,5 @@ if (TRUE) {
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
     SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
-    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Board, 15))
+    # SavePlotAsPng("advantage.png", DpsSpecAdvantage(Board, 15))
 }

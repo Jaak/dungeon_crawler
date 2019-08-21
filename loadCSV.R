@@ -125,6 +125,4 @@ for (file in args) {
     }
 }
 
-setkeyv(Db, c("Region", "PeriodId", "Faction", "Dungeon", "KeystoneLevel", "Success"))
-
 saveRDS(Db, DbFileName)
