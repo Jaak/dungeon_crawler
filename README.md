@@ -43,6 +43,14 @@ This creates a CSV file that on every row contains information about individual 
 
 Supported regions are 'eu', 'us', 'tw' and 'kr'. Display more options with `--help`.
 
+##  High-level overview of project structure:
+
+- `data/static/` contains some static information about WoW M+ (time limits, specs, etc)
+- `img/` contains just example output image
+- `src/` contains rust source code for crawling Blizzard API. The code uses curl. Mangles JSON data from Blizzard to CSV.
+- `Cargo.toml` rust project file
+- `*.R` scripts for drawing charts (more about those below)
+
 ## Usage of R scripts
 
 I have split R code into two parts:
