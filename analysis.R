@@ -100,7 +100,35 @@ DpsShortNames <- c(
     "FuryWarrior" = "Fury"
 )
 
+DpsColumns <- c(
+    "NumFrostDk",
+    "NumUnholyDk",
+    "NumHavocDh",
+    "NumBalanceDruid",
+    "NumFeralDruid",
+    "NumBeastMasterHunter",
+    "NumMarksmanshipHunter",
+    "NumSurvivalHunter",
+    "NumArcaneMage",
+    "NumFireMage",
+    "NumFrostMage",
+    "NumWindwalkerMonk",
+    "NumRetributionPaladin",
+    "NumShadowPriest",
+    "NumAssassinationRogue",
+    "NumOutlawRogue",
+    "NumSubtletyRogue",
+    "NumElementalShaman",
+    "NumEnhancementShaman",
+    "NumAfflictionWarlock",
+    "NumDemonologyWarlock",
+    "NumDestructionWarlock",
+    "NumArmsWarrior",
+    "NumFuryWarrior"
+)
+
 Season1EndDate <- as.POSIXct("2019-01-22 18:00:00")
+Season2EndDate <- as.POSIXct("2019-07-10 18:00:00")
 Patches <- c(
     "8.1"   = as.POSIXct("2018-11-12 04:00:00"),
     "8.1.5" = as.POSIXct("2019-03-13 04:00:00"),
@@ -272,7 +300,7 @@ AddDefaultDatetimeAxis <- function(p) {
     return (
         p +
         geom_vline(xintercept = Patches, size = 0.25, linetype = "dashed") +
-        geom_vline(xintercept = Season1EndDate, size = 0.25) +
+        geom_vline(xintercept = c(Season1EndDate, Season2EndDate), size = 0.25) +
         scale_x_datetime(
             breaks = date_breaks("1 month"),
             date_labels = "%b",
@@ -636,9 +664,9 @@ if (TRUE) {
     cat(paste0("       Last run  ", LastTime, "\n"))
 
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
-    SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 10))
+    # SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 10))
     # SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 10))
-    SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
+    # SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
     SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 10))
 }
 
@@ -657,7 +685,7 @@ if (TRUE) {
     SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board))
     SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
-    SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
+    # SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
     # SavePlotAsPng("advantage.png", DpsSpecAdvantage(Board, 15))
 }
