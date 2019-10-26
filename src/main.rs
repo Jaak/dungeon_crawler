@@ -47,7 +47,7 @@ struct Ctx {
     easy: RefCell<Easy>,
 }
 
-type Result<T> = std::result::Result<T, Box<error::Error + Send + Sync>>;
+type Result<T> = std::result::Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[derive(Debug, Serialize)]
 enum TankSpecialization {
@@ -175,11 +175,11 @@ enum Faction {
 }
 
 // Make sure that Option<> optimization works correctly with our enums.
-assert_eq_size!(enum_size_1; Option<TankSpecialization>, TankSpecialization);
-assert_eq_size!(enum_size_2; Option<HealerSpecialization>, HealerSpecialization);
-assert_eq_size!(enum_size_3; Option<Region>, Region);
-assert_eq_size!(enum_size_4; Option<Dungeon>, Dungeon);
-assert_eq_size!(enum_size_5; Option<Faction>, Faction);
+assert_eq_size!(Option<TankSpecialization>, TankSpecialization);
+assert_eq_size!(Option<HealerSpecialization>, HealerSpecialization);
+assert_eq_size!(Option<Region>, Region);
+assert_eq_size!(Option<Dungeon>, Dungeon);
+assert_eq_size!(Option<Faction>, Faction);
 
 #[serde(rename_all = "PascalCase")]
 #[derive(Default, Debug, Serialize)]
@@ -451,7 +451,7 @@ impl std::fmt::Display for TimeoutError {
 
 impl error::Error for TimeoutError {
     fn description(&self) -> &str { "Timeout" }
-    fn cause(&self) -> Option<&error::Error> { None }
+    fn cause(&self) -> Option<&dyn error::Error> { None }
 }
 
 fn query<T>(ctx: &Ctx, query: &str) -> Result<T>
@@ -628,7 +628,7 @@ fn update_period_index(ctx: &Ctx,
                        path: path::PathBuf) -> Result<()>
 {
     if ! path.is_file() {
-        error!("ERROR: Period index '{}' is not a file. Not updating.", path.display());
+        error!("ERROR: Period index '{}' is missing (or not a file). Skipping.", path.display());
         return Ok(());
     }
 
@@ -732,10 +732,18 @@ fn run_dedup(paths: Vec<path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
+// Configure curl to accept compression and use HTTP2 .
+fn configure_easy(easy: &mut Easy) -> Result<()> {
+    easy.accept_encoding("gzip, deflate")?;
+    easy.pipewait(true)?;
+    Ok(())
+}
+
 fn run_download(cmd: DownloadCmd) -> Result<()> {
 
     info!("Requesting token...");
     let mut easy = Easy::new();
+    configure_easy(&mut easy)?;
     let DownloadCmd{region, workers, rate, period, output, period_index_file} = cmd;
     let access_token = &token_request(&mut easy, region)?;
 
@@ -807,7 +815,7 @@ fn run_download(cmd: DownloadCmd) -> Result<()> {
         // Spawn worker threads
         for _ in 1..workers {
             let mut easy = Easy::new();
-            easy.accept_encoding("gzip")?;
+            configure_easy(&mut easy)?;
 
             let ctx = Ctx {
                 access_token: access_token.access_token.clone(),
