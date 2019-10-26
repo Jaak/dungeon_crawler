@@ -1,9 +1,11 @@
-library(data.table)
-library(ggplot2)
-library(viridis)
-library(scales)
-library(lubridate)
-library(zoo)
+suppressMessages({
+    library(data.table)
+    library(ggplot2)
+    library(viridis)
+    library(scales)
+    library(lubridate)
+    library(zoo)
+})
 
 ReadSpecInfo <- function() {
     colClasses <- c("factor","factor","factor")
@@ -625,7 +627,7 @@ theme_set(theme_linedraw())
 
 # Disable the following conditional if you don't want to bother with fancy fonts.
 if (TRUE) {
-    library(extrafont)
+    suppressMessages(library(extrafont))
     theme_set(theme_linedraw() + theme(text = element_text(family = 'Caladea')))
 }
 
@@ -659,7 +661,7 @@ if (TRUE) {
 
     FirstTime <- min(Week$Datetime)
     LastTime <- max(Week$Datetime)
-    cat("    Plotting statistics of a week.\n")
+    cat("    Statistics of a week.\n")
     cat(paste0("       First run ", FirstTime, "\n"))
     cat(paste0("       Last run  ", LastTime, "\n"))
 
@@ -675,7 +677,7 @@ if (TRUE) {
 #
 
 if (TRUE) {
-    cat("    Plotting statistics of entire time period.\n")
+    cat("    Statistics of entire time period.\n")
     cat(paste0("       First run ", min(Board$Datetime), "\n"))
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
