@@ -22,7 +22,7 @@ ReadClassInfo <- function() {
 }
 
 ReadDungeonInfo <- function() {
-    colClasses <- c("factor","factor","integer")
+    colClasses <- c("factor","factor")
     result <- fread("data/static/dungeon-info.csv",
                     head=TRUE, sep=";", colClasses=colClasses, key=c("Dungeon"))
     return(result)
@@ -35,10 +35,21 @@ ReadAffixInfo <- function() {
     return(result)
 }
 
+ReadDungeonTimeLimits <- function() {
+    colClasses <- c("factor","integer","integer", "integer")
+    result <- fread("data/static/dungeon-time-limits.csv",
+                    head=TRUE,
+                    sep=";",
+                    colClasses=colClasses,
+                    key=c("Dungeon", "PeriodStart", "PeriodEnd"))
+    return(result)
+}
+
 SpecInfo <- ReadSpecInfo()
 ClassInfo <- ReadClassInfo()
 DungeonInfo <- ReadDungeonInfo()
 AffixInfo <- ReadAffixInfo()
+DungeonTimeLimits <- ReadDungeonTimeLimits()
 
 #
 SpecColorTable <- SpecInfo[ClassInfo, on = 'Class'][,.(Spec, Role, Color)]
@@ -129,12 +140,18 @@ DpsColumns <- c(
     "NumFuryWarrior"
 )
 
-Season1EndDate <- as.POSIXct("2019-01-22 18:00:00")
-Season2EndDate <- as.POSIXct("2019-07-10 18:00:00")
+Season1EndDate <- as.POSIXct("2019-01-23", tz = "UTC")
+Season2EndDate <- as.POSIXct("2019-07-10", tz = "UTC")
+Season3EndDate <- as.POSIXct("2020-01-22", tz = "UTC")
 Patches <- c(
-    "8.1"   = as.POSIXct("2018-11-12 04:00:00"),
-    "8.1.5" = as.POSIXct("2019-03-13 04:00:00"),
-    "8.2"   = as.POSIXct("2019-06-26 04:00:00")
+    "8.1"   = as.POSIXct("2018-11-14", tz = "UTC"),
+    "8.1.5" = as.POSIXct("2019-03-13", tz = "UTC"),
+    "8.2"   = as.POSIXct("2019-06-26", tz = "UTC"),
+    "8.2.5" = as.POSIXct("2019-09-25", tz = "UTC"),
+    "8.3"   = as.POSIXct("2020-01-15", tz = "UTC"),
+    "S1"    = Season1EndDate,
+    "S2"    = Season2EndDate,
+    "S3"    = Season3EndDate
 )
 
 
@@ -145,22 +162,23 @@ SavePlotAsPng <- function(name, plot) {
     ggsave(name, plot = plot, width = 7, height = 4, type = "quartz")
 }
 
-RunDurationBoxplot <- function(Board, L) {
-    Title <- paste0("Median run length of +", L, " (compared to time limit)")
-    Tbl <- Board[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
-    Tbl <- Tbl[KeystoneLevel == L]
-    plot <- ggplot (Tbl, aes(x = reorder(Dungeon, TimeMinutes, median), y = TimeMinutes, color = Dungeon)) +
-        stat_boxplot(geom ='errorbar', lwd=0.25) +
-        geom_boxplot(lwd=0.25, outlier.size = 0.1) +
-        geom_point(aes(x=Shorthand, y=TimeLimit, color=Shorthand), data = DungeonInfo, size = 2) +
-        scale_y_log10(breaks = c(20, 30, 40, 60, 120)) +
-        guides(color=FALSE) +
-        xlab("Dungeon") +
-        ylab("Time (in minutes)") +
-        ggtitle (Title)
-
-    return (plot)
-}
+# This is bitrotten:
+# RunDurationBoxplot <- function(Board, L) {
+#     Title <- paste0("Median run length of +", L, " (compared to time limit)")
+#     Tbl <- Board[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
+#     Tbl <- Tbl[KeystoneLevel == L]
+#     plot <- ggplot (Tbl, aes(x = reorder(Dungeon, TimeMinutes, median), y = TimeMinutes, color = Dungeon)) +
+#         stat_boxplot(geom ='errorbar', lwd=0.25) +
+#         geom_boxplot(lwd=0.25, outlier.size = 0.1) +
+#         geom_point(aes(x=Shorthand, y=TimeLimit, color=Shorthand), data = DungeonInfo, size = 2) +
+#         scale_y_log10(breaks = c(20, 30, 40, 60, 120)) +
+#         guides(color=FALSE) +
+#         xlab("Dungeon") +
+#         ylab("Time (in minutes)") +
+#         ggtitle (Title)
+#
+#     return (plot)
+# }
 
 NumberOfRuns <- function(frame) {
     summary <- frame[, list(Runs = .N), keyby=.(KeystoneLevel,Dungeon)]
@@ -182,6 +200,60 @@ RunsByDungeon <- function(Board, L) {
         geom_bar(stat="identity") +
         ggtitle(Title) +
         xlab("Dungeon")
+    return (plot)
+}
+
+RefreshDungeonTimeLimits <- function(Tbl) {
+    # Tbl[, TimeLimit := NULL]
+    Tbl[, PeriodId2 := PeriodId]
+    Tbl <- foverlaps(Tbl, DungeonTimeLimits,
+        by.x = c("Dungeon", "PeriodId", "PeriodId2"),
+        by.y = c("Dungeon", "PeriodStart", "PeriodEnd"),
+        type = "within",
+        mult = "first")
+    if (anyNA(Tbl$TimeLimit)) {
+        cat("WARNING! For some dungeons time limit is missing! Update dungeon-time-limits.csv file.")
+    }
+
+    Tbl[, PeriodId2 := NULL]
+    Tbl[, PeriodStart := NULL]
+    Tbl[, PeriodEnd := NULL]
+    return(Tbl)
+}
+
+ChallengeHeatmap <- function(Board) {
+    # TODO: attach time limit
+    # Test <- Week[DungeonInfo, on = 'Dungeon']
+    Tbl <- Board[Success == TRUE]
+    Tbl <- RefreshDungeonTimeLimits(Tbl)
+    Tbl[, NormalizedDuration := TimeMinutes / TimeLimit]
+    Ord <- Board[, .(AvgSuccess = sum(Success) / .N), keyby=.(Dungeon)]
+
+    Summ <- Tbl[,
+        list(Median = quantile(NormalizedDuration, 0.2)[[1]],
+             Mean = mean(NormalizedDuration),
+             Count = .N),
+        keyby = .(KeystoneLevel, Dungeon)]
+    Summ[, w := 1.0]
+    Summ[Count <= 100, w := 0.8]
+    Summ[Count <= 10, w := 0.6]
+    Summ <- Summ[Ord, on = 'Dungeon']
+    KeyRange <- 2:max(Summ$KeystoneLevel)
+    MinMedian <- min(Summ$Median)
+    MaxMedian <- max(Summ$Median)
+    Summ <- Summ[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
+
+    plot <- ggplot(data=Summ, aes(x=factor(KeystoneLevel),
+                                  y=reorder(Dungeon, AvgSuccess, first))) +
+        geom_tile(aes(fill = Median, width=w, height=w), colour = "white") +
+        scale_fill_viridis(option = "cividis") +
+        geom_text(aes(label = round(Median, 2)), size=2) +
+        scale_x_discrete(breaks=KeyRange, labels=KeyRange) +
+        coord_equal() +
+        xlab("Keystone level") +
+        ylab("Dungeon") +
+        ggtitle("Difficulty of each dungeon and keystone level combination")
+
     return (plot)
 }
 
@@ -243,10 +315,19 @@ DayAverageHeatmap <- function(Board) {
 }
 
 RunsPerDay <- function(Board) {
-    Tbl <- Board[, .(Count = .N, Day = floor_date(first(Datetime), "day")), by=.(DayNr)]
-    plot <- ggplot(data=Tbl, aes(x=Day, y=Count, color = wday(Day, label = TRUE)))
+    Tbl <- Board[, .(Count = .N, Day = floor_date(median(Datetime), "day")), by=.(DayNr)]
+    Tbl <- Tbl[Day != max(Day)]
+    Tbl[, Segment := 0]
+    for (PatchName in names(Patches)) {
+        Patch <- Patches[[PatchName]]
+        Tbl[, Segment := Segment + (Day < Patch)]
+    }
+
+    plot <- ggplot(data=Tbl, aes(x=Day, y=Count))
     plot <- AddDefaultDatetimeAxis(plot) +
-        geom_point() +
+        geom_point(aes(color = wday(Day, label = TRUE))) +
+        geom_smooth(aes(group = factor(Segment)),
+            color = "gray", size = 0.5, method = 'lm', formula = y ~ x, se = FALSE) +
         ylab("Number of runs") +
         labs(color="Day") +
         ggtitle("Number of daily runs over time")
@@ -278,6 +359,7 @@ AvgKeystonePerDay <- function(Board) {
           PeriodId = first(PeriodId),
           Day = floor_date(first(Datetime), "day")),
         by=.(DayNr)]
+    Tbl <- Tbl[DayNr != max(DayNr)]
     Tbl <- Tbl[AffixInfo, on = 'PeriodId']
     Tbl <- Tbl[! is.na(Day)]
     plot <- ggplot(data=Tbl, aes(x=Day, y=AvgKeystoneLevel, color=Affix3, shape=Affix2))
@@ -302,7 +384,7 @@ AddDefaultDatetimeAxis <- function(p) {
     return (
         p +
         geom_vline(xintercept = Patches, size = 0.25, linetype = "dashed") +
-        geom_vline(xintercept = c(Season1EndDate, Season2EndDate), size = 0.25) +
+        geom_vline(xintercept = c(Season1EndDate, Season2EndDate, Season3EndDate), size = 0.25) +
         scale_x_datetime(
             breaks = date_breaks("1 month"),
             date_labels = "%b",
@@ -617,8 +699,20 @@ Board <- AttachDayAndWeekNumbers(Board)
 cat("    Rebuilding database keys...\n")
 setkeyv(Board, c(key(Board), "WeekNr", "DayNr"))
 
-cat("Plotting...\n")
+cat("Charting...\n")
 
+### Temp <- Board[, .(Count = .N), keyby = c("Tank", "Healer", DpsColumns)]
+### cat(paste0("Runs without tank or healer : ", nrow(Temp[Healer == "" & Tank == ""]), "\n"))
+### cat(paste0("Runs without healer : ", nrow(Temp[Healer == ""]), "\n"))
+### cat(paste0("Runs without tank : ", nrow(Temp[Tank == ""]), "\n"))
+###
+### Temp <- Temp[Healer != "" & Tank != ""]
+###
+### setorder(Temp, -Count)
+### cat(paste0("Unique group compositions : ", nrow(Temp), "\n"))
+### print(head(Temp$Count))
+### exit()
+###
 #
 # General style:
 #
@@ -659,17 +753,21 @@ if (TRUE) {
 
     Week <- Board[WeekNr == max(WeekNr)] # latest week
 
+
+
     FirstTime <- min(Week$Datetime)
     LastTime <- max(Week$Datetime)
+
     cat("    Statistics of a week.\n")
     cat(paste0("       First run ", FirstTime, "\n"))
     cat(paste0("       Last run  ", LastTime, "\n"))
 
+    # SavePlotAsPng("challenge-heatmap.png", ChallengeHeatmap(Week))
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
-    # SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 10))
+    SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 15))
     # SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 10))
-    # SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
-    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 10))
+    SavePlotAsPng("run-count.png", RunsByKeystoneLevel(Week))
+    SavePlotAsPng("advantage.png", DpsSpecAdvantage(Week, 15))
 }
 
 #

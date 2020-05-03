@@ -2,7 +2,7 @@ library(data.table)
 
 
 ReadDungeonInfo <- function() {
-    colClasses <- c("factor","factor","integer")
+    colClasses <- c("factor","factor")
     result <- fread("data/static/dungeon-info.csv",
                     head=TRUE,
                     sep=";",
@@ -55,6 +55,25 @@ ReadCSVFile <- function(fname) {
 DungeonInfo <- ReadDungeonInfo()
 PeriodIndex <- ReadPeriodIndex()
 DungeonTimeLimits <- ReadDungeonTimeLimits()
+
+RefreshDungeonTimeLimits <- function(Tbl) {
+    Tbl[, PeriodId2 := PeriodId]
+    Tbl <- foverlaps(Tbl, DungeonTimeLimits,
+        by.x = c("Dungeon", "PeriodId", "PeriodId2"),
+        by.y = c("Dungeon", "PeriodStart", "PeriodEnd"),
+        type = "within",
+        mult = "first")
+    if (anyNA(Tbl$TimeLimit)) {
+        cat("WARNING! For some dungeons time limit is missing! Update dungeon-time-limits.csv file.")
+    }
+
+    Tbl[, PeriodId2 := NULL]
+    Tbl[, PeriodStart := NULL]
+    Tbl[, PeriodEnd := NULL]
+    Tbl[, Success:=TimeMinutes<=TimeLimit]
+    Tbl[, TimeLimit:=NULL]
+    return(Tbl)
+}
 
 Preprocess <- function(Tbl) {
     Tbl[, Timestamp2 := Timestamp]
@@ -110,6 +129,10 @@ DbFileName <- "db.rds"
 # XXX
 if (file.exists(DbFileName)) {
     Db <- readRDS(DbFileName)
+    setcolorder(Db, c("Region", "PeriodId", "Faction", "Dungeon", "KeystoneLevel"))
+    if (FALSE) { # if we have updated time period file
+        Db <- RefreshDungeonTimeLimits(Db)
+    }
 }
 
 for (file in args) {
