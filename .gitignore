@@ -15,6 +15,11 @@ Cargo.lock
 *.rds
 data/season1/
 data/season2/
+data/season3/
+leaderboard-data/
+backups/
+
+.vscode/
 
 .env
 
