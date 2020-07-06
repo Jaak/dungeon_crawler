@@ -57,12 +57,24 @@ Preprocess <- function(Tbl) {
         type = "within",
         mult = "first")
 
+    MillisecondsInADay <- 86400000
+    Tbl[, DayId := floor((Timestamp - StartTimestamp) / MillisecondsInADay)]
+    if (any(Tbl$DayId > 6)) {
+        cat("ERROR! DayId > 6.")
+        quit("no")
+    }
+
+    # Last decimal digit of DayId indicates the number of days since weekly reset.
+    # Weekday can be derived from Timestamp column, but do note that all regions
+    # cover multiple timezones.
+    Tbl[, DayId := PeriodId*10 + DayId]
+
     # Clear useless fields added by foverlaps
     Tbl[, StartTimestamp := NULL]
     Tbl[, EndTimestamp := NULL]
     Tbl[, Timestamp2 := NULL]
-
-    Tbl[,TimeMinutes:=Duration/60000]
+    MillisecondsInAMinute <- 60000
+    Tbl[,TimeMinutes:=Duration/MillisecondsInAMinute]
 
     Tbl[, PeriodId2 := PeriodId]
     Tbl <- foverlaps(Tbl, DungeonTimeLimits,
@@ -71,7 +83,8 @@ Preprocess <- function(Tbl) {
         type = "within",
         mult = "first")
     if (anyNA(Tbl$TimeLimit)) {
-        cat("WARNING! For some dungeons time limit is missing! Update dungeon-time-limits.csv file.")
+        cat("ERROR! Missing time limit! Update dungeon-time-limits.csv file.")
+        quit("no")
     }
 
     Tbl[, PeriodId2 := NULL]
@@ -79,21 +92,19 @@ Preprocess <- function(Tbl) {
     Tbl[, PeriodEnd := NULL]
     Tbl[, Success:=TimeMinutes<=TimeLimit]
     Tbl[, TimeLimit:=NULL]
-
     Tbl[, Timestamp:=as.POSIXct(Timestamp/1000, origin="1970-01-01", tz="UTC")]
-
-    # Remove few more redundant columns
     Tbl[,Duration:=NULL]
 
-    # This is weird:
-    setcolorder(Tbl, c("Region", "PeriodId", "Faction", "Dungeon", "KeystoneLevel", "Timestamp", "TimeMinutes", "Success"))
+    setcolorder(Tbl, c("Region", "PeriodId", "DayId", "Faction", "Dungeon", "KeystoneLevel", "Timestamp", "TimeMinutes", "Success"))
+    setorder(Tbl, Region, PeriodId, DayId, Timestamp)
     return(Tbl)
 }
 
 SaveAsParquet <- function(df, name) {
     dbSchema <- schema(
         Region = string(),
-        PeriodId = int16(),
+        PeriodId = int32(),
+        DayId = int32(),
         Faction = string(),
         Dungeon = string(),
         KeystoneLevel = int8(),
