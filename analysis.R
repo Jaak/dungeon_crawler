@@ -221,42 +221,6 @@ RefreshDungeonTimeLimits <- function(Tbl) {
     return(Tbl)
 }
 
-ChallengeHeatmap <- function(Board) {
-    # TODO: attach time limit
-    # Test <- Week[DungeonInfo, on = 'Dungeon']
-    Tbl <- Board[Success == TRUE]
-    Tbl <- RefreshDungeonTimeLimits(Tbl)
-    Tbl[, NormalizedDuration := TimeMinutes / TimeLimit]
-    Ord <- Board[, .(AvgSuccess = sum(Success) / .N), keyby=.(Dungeon)]
-
-    Summ <- Tbl[,
-        list(Median = quantile(NormalizedDuration, 0.2)[[1]],
-             Mean = mean(NormalizedDuration),
-             Count = .N),
-        keyby = .(KeystoneLevel, Dungeon)]
-    Summ[, w := 1.0]
-    Summ[Count <= 100, w := 0.8]
-    Summ[Count <= 10, w := 0.6]
-    Summ <- Summ[Ord, on = 'Dungeon']
-    KeyRange <- 2:max(Summ$KeystoneLevel)
-    MinMedian <- min(Summ$Median)
-    MaxMedian <- max(Summ$Median)
-    Summ <- Summ[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
-
-    plot <- ggplot(data=Summ, aes(x=factor(KeystoneLevel),
-                                  y=reorder(Dungeon, AvgSuccess, first))) +
-        geom_tile(aes(fill = Median, width=w, height=w), colour = "white") +
-        scale_fill_viridis(option = "cividis") +
-        geom_text(aes(label = round(Median, 2)), size=2) +
-        scale_x_discrete(breaks=KeyRange, labels=KeyRange) +
-        coord_equal() +
-        xlab("Keystone level") +
-        ylab("Dungeon") +
-        ggtitle("Difficulty of each dungeon and keystone level combination")
-
-    return (plot)
-}
-
 KeystoneLevelHeatmap <- function(Board) {
     Summ <- Board[, .(Count = .N, SuccessRate=sum(Success) / .N), keyby=.(Dungeon, KeystoneLevel)]
     # TODO: 100 is just arbitrary limit for "too small sample"...
@@ -280,9 +244,9 @@ KeystoneLevelHeatmap <- function(Board) {
     return (plot)
 }
 
-DayHeatmap <- function(Board) {
-    Ord <- Board[KeystoneLevel == 10, .(AvgSuccess = sum(Success) / .N), keyby=.(Dungeon)]
-    Tbl <- Board[KeystoneLevel == 10,
+DayHeatmap <- function(Board, L) {
+    Ord <- Board[KeystoneLevel == L, .(AvgSuccess = sum(Success) / .N), keyby=.(Dungeon)]
+    Tbl <- Board[KeystoneLevel == L,
         .(SuccessRate=sum(Success) / .N, Day = floor_date(median(Datetime), "day")),
         keyby=.(Dungeon, DayNr)]
     Tbl <- Tbl[Ord, on = 'Dungeon']
@@ -293,7 +257,7 @@ DayHeatmap <- function(Board) {
         scale_x_datetime(breaks = date_breaks("1 month"), date_labels = "%b") +
         xlab("Time") +
         ylab("Dungeon") +
-        ggtitle("Success rate in +10 dungeons over time")
+        ggtitle(paste0("Success rate in +", L, " dungeons over time"))
     return (plot)
 }
 
@@ -601,59 +565,6 @@ DpsSpecAdvantage <- function(Board, MinLevel) {
     return (plot)
 }
 
-AnimateRunCount <- function(Board) {
-    Summ <- Board[KeystoneLevel <= 18,
-        .(Runs = .N,
-          Week = as.Date(floor_date(first(Datetime), "day"))),
-        by=.(KeystoneLevel, Success, WeekNr)]
-
-    plot <- ggplot(data=Summ, aes(x = factor(KeystoneLevel), y = Runs, fill = Success)) +
-        geom_bar(stat="identity") +
-        xlab("Keystone level") +
-        ylab("Number of runs") +
-        guides(fill=FALSE) +
-        labs(title='Week: {frame_time}') +
-        coord_cartesian(ylim=c(0,75000)) +
-        transition_time(Week) +
-        ease_aes('linear')
-
-    N <- length(unique(Summ$WeekNr))
-    anim <- animate(plot,
-        device='png',
-        fps = 1, nframes = N,
-        width = 2000, height = 1200, res = 300)
-
-    return (anim)
-}
-
-# i think this does not work too well
-AnimateDungeons<- function(Board, L) {
-    Summ <- Board[KeystoneLevel == L & DayNr < max(DayNr),
-        .(Count = .N),
-        keyby=.(Dungeon, Success, DayNr)]
-
-    Summ <- Summ[CJ(Dungeon, Success, DayNr, unique=TRUE)][is.na(Count), Count := 0]
-
-    Summ <- Summ[DungeonInfo, on = 'Dungeon', Dungeon := Shorthand]
-
-    plot <- ggplot(data=Summ, aes(x = Dungeon, y = Count, fill = Success)) +
-        geom_bar(stat="identity") +
-        xlab("Dungeon") +
-        ylab("Number of runs") +
-        guides(fill=FALSE) +
-        labs(title = 'Day: {frame_time}') +
-        transition_time(DayNr) +
-        ease_aes('linear')
-
-    N <- length(unique(Summ$DayNr))
-    anim <- animate(plot,
-        device='png',
-        fps = 7, nframes = N,
-        width = 2000, height = 1200, res = 300)
-
-    return (anim)
-}
-
 # Following function adds DayNr and WeekNr rows to database.
 # This is pretty ugly code, sorry.
 # This is bit tricky because different regions reset different times and we
@@ -726,17 +637,6 @@ if (TRUE) {
 }
 
 #
-# Animations:
-#
-
-if (FALSE) {
-    library(gganimate)
-
-    # anim_save(AnimateDungeons(Board, 10), file = 'dungeons-animation.gif')
-    anim_save(AnimateRunCount(Board), file = 'runs-animation.gif')
-}
-
-#
 # Bunch of graphs for specific weeks:
 #
 
@@ -753,8 +653,6 @@ if (TRUE) {
 
     Week <- Board[WeekNr == max(WeekNr)] # latest week
 
-
-
     FirstTime <- min(Week$Datetime)
     LastTime <- max(Week$Datetime)
 
@@ -762,7 +660,6 @@ if (TRUE) {
     cat(paste0("       First run ", FirstTime, "\n"))
     cat(paste0("       Last run  ", LastTime, "\n"))
 
-    # SavePlotAsPng("challenge-heatmap.png", ChallengeHeatmap(Week))
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
     SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 15))
     # SavePlotAsPng("duration-boxplot.png", RunDurationBoxplot(Week, 10))
@@ -780,7 +677,7 @@ if (TRUE) {
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
     SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, top = 0.8))
-    # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board))
+    # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board, 15))
     # SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
     SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board))
     SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board))
