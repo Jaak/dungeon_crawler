@@ -143,15 +143,19 @@ DpsColumns <- c(
 Season1EndDate <- as.POSIXct("2019-01-23", tz = "UTC")
 Season2EndDate <- as.POSIXct("2019-07-10", tz = "UTC")
 Season3EndDate <- as.POSIXct("2020-01-22", tz = "UTC")
+
 Patches <- c(
     "8.1"   = as.POSIXct("2018-11-14", tz = "UTC"),
     "8.1.5" = as.POSIXct("2019-03-13", tz = "UTC"),
     "8.2"   = as.POSIXct("2019-06-26", tz = "UTC"),
     "8.2.5" = as.POSIXct("2019-09-25", tz = "UTC"),
-    "8.3"   = as.POSIXct("2020-01-15", tz = "UTC"),
-    "S1"    = Season1EndDate,
-    "S2"    = Season2EndDate,
-    "S3"    = Season3EndDate
+    "8.3"   = as.POSIXct("2020-01-15", tz = "UTC")
+)
+
+Seasons <- c(
+    "S2" = Season1EndDate,
+    "S3" = Season2EndDate,
+    "S4" = Season3EndDate
 )
 
 
@@ -282,8 +286,8 @@ RunsPerDay <- function(Board) {
     Tbl <- Board[, .(Count = .N, Day = floor_date(median(Datetime), "day")), by=.(DayNr)]
     Tbl <- Tbl[Day != max(Day)]
     Tbl[, Segment := 0]
-    for (PatchName in names(Patches)) {
-        Patch <- Patches[[PatchName]]
+    for (SeasonName in names(Seasons)) {
+        Patch <- Seasons[[SeasonName]]
         Tbl[, Segment := Segment + (Day < Patch)]
     }
 
@@ -348,13 +352,13 @@ AddDefaultDatetimeAxis <- function(p) {
     return (
         p +
         geom_vline(xintercept = Patches, size = 0.25, linetype = "dashed") +
-        geom_vline(xintercept = c(Season1EndDate, Season2EndDate, Season3EndDate), size = 0.25) +
+        geom_vline(xintercept = Seasons, size = 0.25) +
         scale_x_datetime(
             breaks = date_breaks("1 month"),
             date_labels = "%b",
             sec.axis = dup_axis(
-                breaks = Patches,
-                labels = names(Patches)
+                breaks = Seasons,
+                labels = names(Seasons)
             )
         ) +
         theme(axis.title.x = element_blank())
