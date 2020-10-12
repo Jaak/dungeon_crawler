@@ -268,7 +268,6 @@ pub async fn async_download(cmd: DownloadCmd) -> Result<()> {
     let DownloadCmd{region, workers: _, rate: _, period, output, period_index_file} = cmd;
     let https = HttpsConnector::new();
     let client = Client::builder()
-        .keep_alive(true)
         .build::<_, hyper::Body>(https);
     let access_token = async_token_request(&client, region).await
         .context("Failed access token request.")?;

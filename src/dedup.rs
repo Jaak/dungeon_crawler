@@ -27,7 +27,7 @@ fn dedup_rows(path: path::PathBuf) -> Result<()> {
     for line in BufReader::new(file).lines() {
         let line = line?;
         let line_u8 = line.as_bytes();
-        if filter.test_and_add(line_u8) {
+        if filter.test_and_add(line_u8)? {
             writer.write_all(line_u8)?;
             writer.write_all(b"\n")?;
         } else {
