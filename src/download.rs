@@ -1,5 +1,5 @@
 use crate::error::*;
-use crate::summary_data::{Dungeon, Region, DataRow};
+use crate::summary_data::{Region, DataRow};
 use crate::json;
 
 use chrono::prelude::*;
@@ -7,6 +7,7 @@ use crossbeam_channel::{bounded, tick, TrySendError, RecvError};
 use curl::easy::{List, Easy};
 use fs2::FileExt;
 use log::{error, info};
+use process::abort;
 use regex::Regex;
 use std::{cell::RefCell, path, env, process, fs, collections::HashSet, thread, time};
 use structopt::StructOpt;
@@ -15,6 +16,9 @@ use structopt::StructOpt;
 pub struct DownloadCmd {
     #[structopt(long, default_value = "eu", help="Region to download from. Either eu, us, tw, kr or cn.")]
     pub region: Region,
+
+    #[structopt(long, help="Display information about dungeons (id, name, keystone duration).")]
+    pub dungeon_keystone_info: bool,
 
     #[structopt(long, default_value = "10", help="Number of worker threads to spawn.")]
     pub workers: usize,
@@ -178,7 +182,6 @@ fn query_connected_realms(ctx: &Ctx) -> Result<Vec<u32>> {
 
 #[derive(Debug)]
 struct LeaderboardEntry {
-    dungeon_name: Dungeon,
     dungeon_id: u32,
 }
 
@@ -189,15 +192,9 @@ fn query_mythic_leaderboard_index(ctx: &Ctx, realm_id: u32) -> Result<Vec<Leader
     let leaderboard: json::LeaderboardIndex = query(ctx, query_str)?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
-        if let Some(dungeon) = Dungeon::from_id(entry.id) {
-            result.push(LeaderboardEntry {
-                dungeon_name: dungeon,
-                dungeon_id: entry.id,
-            });
-        }
-        else {
-            bail!("Unexpected dungeon id {} for \"{}\"", entry.id, entry.name);
-        }
+        result.push(LeaderboardEntry {
+            dungeon_id: entry.id,
+        });
     }
 
     Ok(result)
@@ -215,6 +212,26 @@ fn query_mythic_leaderboard(ctx: &Ctx, q: &GetMythicLeaderboard) -> Result<json:
 fn query_period_index(ctx: &Ctx) -> Result<json::PeriodIndex> {
     let query_str = "data/wow/mythic-keystone/period/index";
     query(ctx, query_str)
+}
+
+fn query_dungeon_index(ctx: &Ctx) -> Result<json::DungeonIndex> {
+    let query_str = "data/wow/mythic-keystone/dungeon/index";
+    query(ctx, query_str)
+}
+
+// Returns time in minutes to upgrade said dungeon.
+fn query_dungeon_keystone_upgrade_duration(ctx: &Ctx, id: u32) -> Result<u32> {
+    let query_str = &format!("data/wow/mythic-keystone/dungeon/{}", id);
+    let res : json::DungeonKeystoneUpgrades = query(ctx, query_str)?;
+    for upgrade in res.keystone_upgrades {
+        if upgrade.upgrade_level == 1 {
+            let duration =
+                (upgrade.qualifying_duration / 1000u64 / 60u64) as u32;
+            return Ok(duration)
+        }
+    }
+
+    bail!("Dungeon {} has missing keystone upgrade duration.", id);
 }
 
 fn query_period(ctx: &Ctx, id: u32) -> Result<json::Period> {
@@ -283,7 +300,7 @@ pub fn run_download(cmd: DownloadCmd) -> Result<()> {
     info!("Requesting token...");
     let mut easy = Easy::new();
     configure_easy(&mut easy)?;
-    let DownloadCmd{region, workers, rate, period, output, period_index_file} = cmd;
+    let DownloadCmd{region, dungeon_keystone_info, workers, rate, period, output, period_index_file} = cmd;
     let access_token = &token_request(&mut easy, region)?;
 
     // Global context
@@ -292,6 +309,16 @@ pub fn run_download(cmd: DownloadCmd) -> Result<()> {
         region: region,
         easy: RefCell::new(easy),
     };
+
+    if dungeon_keystone_info {
+        info!("query_dungeon_index()...");
+        let dungeon_index = query_dungeon_index(gctx)?;
+        for dungeon_info in dungeon_index.dungeons {
+            let duration = query_dungeon_keystone_upgrade_duration(gctx, dungeon_info.id)?;
+            info!("Dungeon \"{}\" has id {} and duration {} minutes",
+                dungeon_info.name, dungeon_info.id, duration);
+        }
+    }
 
     // Query period ID index (TODO: cache this based on the latest time range)
     info!("query_period_index()...");
@@ -365,10 +392,9 @@ pub fn run_download(cmd: DownloadCmd) -> Result<()> {
             let rows_s = rows_s.clone();
             let handle_query = move |q| -> Result<()> {
                 let leaderboard = query_mythic_leaderboard(&ctx, &q)?;
-                let dungeon = Dungeon::from_id(q.dungeon_id).unwrap();
                 if let Some(leading_groups) = leaderboard.leading_groups {
                     for leading_group in leading_groups {
-                        rows_s.send(DataRow::new(region, dungeon, &leading_group))?;
+                        rows_s.send(DataRow::new(region, q.dungeon_id, &leading_group))?;
                     }
                 }
 

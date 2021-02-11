@@ -2,12 +2,12 @@ library(data.table)
 
 
 ReadDungeonInfo <- function() {
-    colClasses <- c("factor","factor")
+    colClasses <- c("character", "factor","factor")
     result <- fread("data/static/dungeon-info.csv",
                     head=TRUE,
                     sep=";",
                     colClasses=colClasses,
-                    key=c("Dungeon"))
+                    key=c("Id"))
     return(result)
 }
 
@@ -76,6 +76,12 @@ RefreshDungeonTimeLimits <- function(Tbl) {
 }
 
 Preprocess <- function(Tbl) {
+    # Map dungeon ID to name
+    # If data already has name try to respect that.
+    Tbl[, Id := Dungeon]
+    Tbl <- Tbl[DungeonInfo, on = 'Id', Dungeon := i.Dungeon]
+    Tbl[, Id := NULL]
+
     Tbl[, Timestamp2 := Timestamp]
 
     Tbl <- foverlaps(Tbl, PeriodIndex,

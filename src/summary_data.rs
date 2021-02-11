@@ -80,42 +80,6 @@ impl FromStr for Region {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize)]
-pub enum Dungeon {
-    AtalDazar = 1,
-    Freehold,
-    KingsRest,
-    ShrineOfTheStorms,
-    SiegeOfBoralus,
-    TempleOfSethraliss,
-    TheMotherlode,
-    TheUnderrot,
-    TolDagor,
-    WaycrestManor,
-    OperationMechagonJunkyard,
-    OperationMechagonWorkshop,
-}
-
-impl Dungeon {
-    pub fn from_id(dungeon_id: u32) -> Option<Dungeon> {
-        match dungeon_id {
-            244 => Some(Dungeon::AtalDazar),
-            245 => Some(Dungeon::Freehold),
-            246 => Some(Dungeon::TolDagor),
-            247 => Some(Dungeon::TheMotherlode),
-            248 => Some(Dungeon::WaycrestManor),
-            249 => Some(Dungeon::KingsRest),
-            250 => Some(Dungeon::TempleOfSethraliss),
-            251 => Some(Dungeon::TheUnderrot),
-            252 => Some(Dungeon::ShrineOfTheStorms),
-            353 => Some(Dungeon::SiegeOfBoralus),
-            369 => Some(Dungeon::OperationMechagonJunkyard),
-            370 => Some(Dungeon::OperationMechagonWorkshop),
-            _   => None,
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub enum Faction {
     ALLIANCE = 1,
@@ -126,7 +90,6 @@ pub enum Faction {
 assert_eq_size!(Option<TankSpecialization>, TankSpecialization);
 assert_eq_size!(Option<HealerSpecialization>, HealerSpecialization);
 assert_eq_size!(Option<Region>, Region);
-assert_eq_size!(Option<Dungeon>, Dungeon);
 assert_eq_size!(Option<Faction>, Faction);
 
 #[serde(rename_all = "PascalCase")]
@@ -134,7 +97,7 @@ assert_eq_size!(Option<Faction>, Faction);
 pub struct DataRow {
     region: Option<Region>,
     faction: Option<Faction>,
-    dungeon: Option<Dungeon>,
+    dungeon: u32,
     timestamp: u64,
     duration: u32,
     keystone_level: u32,
@@ -168,11 +131,11 @@ pub struct DataRow {
 }
 
 impl DataRow {
-    pub fn new(region: Region, dungeon: Dungeon, group: &json::LeadingGroup) -> DataRow {
+    pub fn new(region: Region, dungeon: u32, group: &json::LeadingGroup) -> DataRow {
         let mut result = DataRow {
             region: Some(region),
             faction: None,
-            dungeon: Some(dungeon),
+            dungeon: dungeon,
             timestamp: group.completed_timestamp,
             duration: group.duration,
             keystone_level: group.keystone_level,

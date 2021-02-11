@@ -92,6 +92,29 @@ pub struct PeriodIndex {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct DungeonInfo {
+    pub id: u32,
+    pub name: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DungeonIndex {
+    pub dungeons: Vec<DungeonInfo>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct KeystoneUpgrade {
+    pub upgrade_level: u32,
+    pub qualifying_duration: u64,
+}
+
+#[derive(Deserialize, Debug)]
+// The actual structure contains much more information
+pub struct DungeonKeystoneUpgrades {
+    pub keystone_upgrades: Vec<KeystoneUpgrade>
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Period {
     pub id: u32,
     pub start_timestamp: u64,

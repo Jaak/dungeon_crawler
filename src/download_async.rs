@@ -1,7 +1,7 @@
 use crate::download::DownloadCmd;
 use crate::error::Result;
 use crate::json;
-use crate::summary_data::{Dungeon, Region, DataRow};
+use crate::summary_data::{Region, DataRow};
 
 use chrono::prelude::*;
 use log::{error, info};
@@ -27,6 +27,21 @@ struct Ctx {
     limiter: RateLimiter,
 }
 
+impl Ctx {
+    fn bearer_str(&self) -> String {
+        format!("Bearer {token}", token = self.access_token)
+    }
+
+    fn query_str(&self, query: &str) -> String {
+        format!(
+            "{gateway}/{query}?namespace=dynamic-{region}&locale=en_US",
+            gateway = self.region.gateway_uri(),
+            region = self.region.to_string(),
+            query = query
+        )
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
 #[serde(rename_all = "PascalCase")]
 struct PeriodIndexEntry {
@@ -45,17 +60,8 @@ struct GetMythicLeaderboard {
 }
 
 fn build_request(ctx: &Ctx, query: &str) -> Request<Body> {
-    let query_str = &format!(
-        "{gateway}/{query}?namespace=dynamic-{region}&locale=en_US",
-        gateway = ctx.region.gateway_uri(),
-        region = ctx.region.to_string(),
-        query = query
-    );
-
-    let bearer_str = &format!("Bearer {token}", token = ctx.access_token);
-
-    Request::get(query_str)
-        .header("Authorization", bearer_str)
+    Request::get(ctx.query_str(query))
+        .header("Authorization", ctx.bearer_str())
         .body(Body::empty())
         .unwrap()
 }
@@ -63,7 +69,6 @@ fn build_request(ctx: &Ctx, query: &str) -> Request<Body> {
 /**
  * Handle request while trying to respect the rate limit.
  * TODO: implement retry mechanism.
- *
  */
 async fn handle_request(ctx: Arc<Ctx>, req: Request<Body>) -> Result<Vec<u8>> {
     let timeout_msg = Vec::from("Timeout".as_bytes());
@@ -78,18 +83,9 @@ async fn handle_request(ctx: Arc<Ctx>, req: Request<Body>) -> Result<Vec<u8>> {
         data.extend_from_slice(&chunk);
     }
 
-    if data.is_empty() {
-        bail!("Received empty response");
-    }
-
-    if data == timeout_msg {
-        bail!("Request timed out.");
-    }
-
-    if data == server_error_msg {
-        bail!("Internal server error.");
-    }
-
+    if data.is_empty() { bail!("Received empty response"); }
+    if data == timeout_msg { bail!("Request timed out."); }
+    if data == server_error_msg { bail!("Internal server error."); }
     return Ok(data);
 }
 
@@ -109,7 +105,6 @@ where
 
 #[derive(Debug)]
 struct LeaderboardEntry {
-    dungeon_name: Dungeon,
     dungeon_id: u32,
 }
 
@@ -120,15 +115,9 @@ async fn query_mythic_leaderboard_index(ctx: Arc<Ctx>, realm_id: u32) -> Result<
     let leaderboard: json::LeaderboardIndex = async_query(ctx, query_str).await?;
     let mut result = Vec::new();
     for entry in leaderboard.current_leaderboards {
-        if let Some(dungeon) = Dungeon::from_id(entry.id) {
             result.push(LeaderboardEntry {
-                dungeon_name: dungeon,
-                dungeon_id: entry.id,
-            });
-        }
-        else {
-            bail!("Unexpected dungeon id {} for \"{}\"", entry.id, entry.name)
-        }
+            dungeon_id: entry.id,
+        });
     }
 
     Ok(result)
@@ -265,7 +254,7 @@ async fn update_period_index(
 }
 
 pub async fn async_download(cmd: DownloadCmd) -> Result<()> {
-    let DownloadCmd{region, workers: _, rate: _, period, output, period_index_file} = cmd;
+    let DownloadCmd{region, dungeon_keystone_info, workers: _, rate: _, period, output, period_index_file} = cmd;
     let https = HttpsConnector::new();
     let client = Client::builder()
         .build::<_, hyper::Body>(https);
@@ -368,10 +357,9 @@ pub async fn async_download(cmd: DownloadCmd) -> Result<()> {
             let handle = tokio::spawn(
                 async move {
                     let leaderboard = query_mythic_leaderboard(ctx, &q).await?;
-                    let dungeon = Dungeon::from_id(q.dungeon_id).expect("Unexpected dungeon ID!");
                     if let Some(leading_groups) = leaderboard.leading_groups {
                         for leading_group in leading_groups {
-                            let row = DataRow::new(region, dungeon, &leading_group);
+                            let row = DataRow::new(region, q.dungeon_id, &leading_group);
                             wrt.lock().await.serialize(row)?;
                         }
                     }

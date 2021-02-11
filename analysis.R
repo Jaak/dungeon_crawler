@@ -22,7 +22,7 @@ ReadClassInfo <- function() {
 }
 
 ReadDungeonInfo <- function() {
-    colClasses <- c("factor","factor")
+    colClasses <- c("character", "factor","factor")
     result <- fread("data/static/dungeon-info.csv",
                     head=TRUE, sep=";", colClasses=colClasses, key=c("Dungeon"))
     return(result)
@@ -149,7 +149,8 @@ Patches <- c(
     "8.1.5" = as.POSIXct("2019-03-13", tz = "UTC"),
     "8.2"   = as.POSIXct("2019-06-26", tz = "UTC"),
     "8.2.5" = as.POSIXct("2019-09-25", tz = "UTC"),
-    "8.3"   = as.POSIXct("2020-01-15", tz = "UTC")
+    "8.3"   = as.POSIXct("2020-01-15", tz = "UTC"),
+    "8.3.7" = as.POSIXct("2020-07-21", tz = "UTC")
 )
 
 Seasons <- c(
@@ -365,7 +366,15 @@ AddDefaultDatetimeAxis <- function(p) {
     )
 }
 
-TankPercentageOverTime <- function(Board, smooth = FALSE) {
+TankPercentageOverTime <- function(Board, top = NULL, smooth = FALSE) {
+    Title <- "Tank popularity over time"
+    if (! is.null(top)) {
+        Board <- Board[Success == TRUE]
+        setorder(Board, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
+        Board <- Board[, .SD[, .SD[.I < .N * top]], by = .(Dungeon, DayNr)]
+        Title <- paste0(Title, " (top ", round(100*top), "% of runs)")
+    }
+
     Summ <- Board[
         Tank != "",
         .(Count=.N, Day = mean(Datetime)),
@@ -401,11 +410,19 @@ TankPercentageOverTime <- function(Board, smooth = FALSE) {
         scale_y_continuous(labels = percent) +
         guides(size = "none", color = guide_legend("Tank")) +
         ylab("Frequency") +
-        ggtitle("Tank popularity over time")
+        ggtitle(Title)
     return (plot)
 }
 
-HealerPercentageOverTime <- function(Board, smooth = FALSE) {
+HealerPercentageOverTime <- function(Board, top = NULL, smooth = FALSE) {
+
+    Title <- "Healer popularity over time"
+    if (! is.null(top)) {
+        Board <- Board[Success == TRUE]
+        setorder(Board, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
+        Board <- Board[, .SD[, .SD[.I < .N * top]], by = .(Dungeon, DayNr)]
+        Title <- paste0(Title, " (top ", round(100*top), "% of runs)")
+    }
 
     # Aggregate:
     Summ <- Board[
@@ -446,7 +463,7 @@ HealerPercentageOverTime <- function(Board, smooth = FALSE) {
         scale_y_continuous(labels = percent) +
         guides(size = "none", color = guide_legend("Healer")) +
         ylab("Frequency") +
-        ggtitle("Healer popularity over time")
+        ggtitle(Title)
     return (plot)
 }
 
@@ -683,8 +700,8 @@ if (TRUE) {
     SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, top = 0.8))
     # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board, 15))
     # SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
-    SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board))
-    SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board))
+    SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board, top = 0.05))
+    SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board, top = 0.05))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
     # SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
