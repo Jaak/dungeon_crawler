@@ -150,6 +150,7 @@ fn token_request(easy: &mut Easy, region: Region) -> Result<json::AccessToken> {
     let mut list = List::new();
     list.append("Accept: application/json")?;
     easy.http_headers(list)?;
+    easy.post(true)?;
     let data = write_to_vector(easy)?;
     match serde_json::from_slice(data.as_slice()) {
         Ok(json_value) => Ok(json_value),
@@ -302,6 +303,9 @@ pub fn run_download(cmd: DownloadCmd) -> Result<()> {
     configure_easy(&mut easy)?;
     let DownloadCmd{region, dungeon_keystone_info, workers, rate, period, output, period_index_file} = cmd;
     let access_token = &token_request(&mut easy, region)?;
+
+    easy.post(false)?;
+    easy.get(true)?;
 
     // Global context
     let gctx = &Ctx {

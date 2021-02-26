@@ -33,6 +33,7 @@ mod download;
 mod download_async;
 mod json;
 mod summary_data;
+mod get;
 
 use dotenv::dotenv;
 use std::{str, path};
@@ -58,6 +59,9 @@ enum Cfg {
         #[structopt(help="CSV files to deduplicate.", parse(from_os_str))]
         paths: Vec<path::PathBuf>,
     },
+
+    #[structopt(name = "get", about = "Directly query Battle.net API.")]
+    Get(get::GetCmd)
 }
 
 #[tokio::main]
@@ -71,6 +75,7 @@ async fn main() -> Result<()> {
         Cfg::Dedup{paths} => dedup::run_dedup(paths)?,
         Cfg::Download(cmd) => download::run_download(cmd)?,
         Cfg::NewDownload(cmd) => download_async::async_download(cmd).await?,
+        Cfg::Get(cmd) => get::run(cmd).await?,
     }
 
     Ok(())
