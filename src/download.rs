@@ -7,7 +7,6 @@ use crossbeam_channel::{bounded, tick, TrySendError, RecvError};
 use curl::easy::{List, Easy};
 use fs2::FileExt;
 use log::{error, info};
-use process::abort;
 use regex::Regex;
 use std::{cell::RefCell, path, env, process, fs, collections::HashSet, thread, time};
 use structopt::StructOpt;

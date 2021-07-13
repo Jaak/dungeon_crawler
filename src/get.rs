@@ -1,21 +1,14 @@
 use crate::{error::*, json};
 use crate::summary_data::Region;
-use std::path;
+use std::{fs::File, path};
 
 use serde_json::Value;
 use structopt::StructOpt;
-use chrono::prelude::*;
-use log::{error, info};
-use std::{env, process, str, collections::HashSet, fs, sync::Arc};
 use hyper_tls::HttpsConnector;
-use tokio::sync::Mutex;
 use hyper::{body::HttpBody as _, Client, Request, Body};
-use fs2::FileExt;
-use regex::Regex;
-use std::{rc::Rc, time::{self, Duration}, cell::RefCell};
-use governor::{Quota, state, clock::DefaultClock};
+use std::io::BufWriter;
+use std::{env, str};
 use anyhow::Context;
-use futures::stream::{FuturesUnordered, StreamExt};
 
 #[derive(StructOpt)]
 pub struct GetCmd {
@@ -25,7 +18,7 @@ pub struct GetCmd {
     #[structopt(short = "o", long, help="Output CSV file.", parse(from_os_str))]
     pub output: Option<path::PathBuf>,
 
-    #[structopt(long, short = "n", default_value = "dynamic", help="BattleNet namespave.")]
+    #[structopt(long, short = "n", default_value = "dynamic", help="BattleNet namespace.")]
     pub namespace: String,
 
     #[structopt(help="API endpoint.")]
@@ -58,14 +51,11 @@ impl RequestCtx {
 
 fn build_request(ctx: &RequestCtx, query: &str) -> Request<Body> {
     let uri = &ctx.query_str(query);
-    dbg!(uri);
     Request::get(uri)
         .header("Authorization", ctx.bearer_str())
         .body(Body::empty())
         .unwrap()
 }
-
-// fn build_post()
 
 async fn async_token_request(client: &AsyncClient, region: Region) -> Result<json::AccessToken> {
     let client_id = &env::var("CLIENT_ID")?;
@@ -116,14 +106,25 @@ async fn async_query(client: AsyncClient, ctx: RequestCtx, query: &str) -> Resul
 
 pub async fn run(cmd: GetCmd) -> Result<()> {
     let GetCmd{region, output, namespace, api} = cmd;
+
+    if namespace != "static" && namespace != "dynamic" && namespace != "profile" {
+        bail!("Invalid namespace. Either \"static\", \"dynamic\" or \"profile\".")
+    }
+
     let https = HttpsConnector::new();
     let client = Client::builder()
         .build::<_, hyper::Body>(https);
     let access_token = async_token_request(&client, region).await
         .context("Failed access token request.")?;
-    println!("got token!");
     let ctx = RequestCtx { region, namespace, access_token: access_token.access_token };
     let res = async_query(client, ctx, api.as_str()).await?;
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    if let Some(output) = output {
+        let file = File::create(output)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &res)?;
+    }
+    else {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    }
     Ok(())
 }

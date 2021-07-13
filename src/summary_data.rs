@@ -135,7 +135,7 @@ impl DataRow {
         let mut result = DataRow {
             region: Some(region),
             faction: None,
-            dungeon: dungeon,
+            dungeon,
             timestamp: group.completed_timestamp,
             duration: group.duration,
             keystone_level: group.keystone_level,

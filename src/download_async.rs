@@ -254,7 +254,7 @@ async fn update_period_index(
 }
 
 pub async fn async_download(cmd: DownloadCmd) -> Result<()> {
-    let DownloadCmd{region, dungeon_keystone_info, workers: _, rate: _, period, output, period_index_file} = cmd;
+    let DownloadCmd{region, dungeon_keystone_info: _, workers: _, rate: _, period, output, period_index_file} = cmd;
     let https = HttpsConnector::new();
     let client = Client::builder()
         .build::<_, hyper::Body>(https);
