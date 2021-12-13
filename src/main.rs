@@ -21,7 +21,6 @@ extern crate tempfile;
 extern crate cuckoofilter;
 extern crate fs2;
 extern crate governor;
-#[macro_use]
 extern crate nonzero_ext;
 #[macro_use]
 extern crate anyhow;

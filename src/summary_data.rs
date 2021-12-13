@@ -92,8 +92,8 @@ assert_eq_size!(Option<HealerSpecialization>, HealerSpecialization);
 assert_eq_size!(Option<Region>, Region);
 assert_eq_size!(Option<Faction>, Faction);
 
-#[serde(rename_all = "PascalCase")]
 #[derive(Default, Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct DataRow {
     region: Option<Region>,
     faction: Option<Faction>,

@@ -143,6 +143,7 @@ DpsColumns <- c(
 Season1EndDate <- as.POSIXct("2019-01-23", tz = "UTC")
 Season2EndDate <- as.POSIXct("2019-07-10", tz = "UTC")
 Season3EndDate <- as.POSIXct("2020-01-22", tz = "UTC")
+Season4EndDate <- as.POSIXct("2021-07-06", tz = "UTC")
 
 Patches <- c(
     "8.1"   = as.POSIXct("2018-11-14", tz = "UTC"),
@@ -150,13 +151,16 @@ Patches <- c(
     "8.2"   = as.POSIXct("2019-06-26", tz = "UTC"),
     "8.2.5" = as.POSIXct("2019-09-25", tz = "UTC"),
     "8.3"   = as.POSIXct("2020-01-15", tz = "UTC"),
-    "8.3.7" = as.POSIXct("2020-07-21", tz = "UTC")
+    "8.3.7" = as.POSIXct("2020-07-21", tz = "UTC"),
+    "9.0.5" = as.POSIXct("2021-03-09", tz = "UTC"),
+    "9.1"   = as.POSIXct("2021-06-29", tz = "UTC")
 )
 
 Seasons <- c(
-    "S2" = Season1EndDate,
-    "S3" = Season2EndDate,
-    "S4" = Season3EndDate
+    "BFA S2" = Season1EndDate,
+    "BFA S3" = Season2EndDate,
+    "BFA S4" = Season3EndDate,
+    "S2" = Season4EndDate
 )
 
 
@@ -467,7 +471,15 @@ HealerPercentageOverTime <- function(Board, top = NULL, smooth = FALSE) {
     return (plot)
 }
 
-DpsPercentageOverTime <- function(Board, top = NULL, smooth = FALSE, discard = NULL) {
+DpsPercentageOverTime <-
+    function(Board,
+             top = NULL,
+             smooth = FALSE,
+             MinLevel = NULL,
+             discard = NULL,
+             role = NULL)
+{
+    Title <- "DPS spec popularity over time"
     Indicators <- data.table(
         Indicator = c("NumFrostDk", "NumUnholyDk", "NumHavocDh", "NumBalanceDruid", "NumFeralDruid", "NumBeastMasterHunter", "NumMarksmanshipHunter", "NumSurvivalHunter", "NumArcaneMage", "NumFireMage", "NumFrostMage", "NumWindwalkerMonk", "NumRetributionPaladin", "NumShadowPriest", "NumAssassinationRogue", "NumOutlawRogue", "NumSubtletyRogue", "NumElementalShaman", "NumEnhancementShaman", "NumAfflictionWarlock", "NumDemonologyWarlock", "NumDestructionWarlock", "NumArmsWarrior", "NumFuryWarrior"),
         Spec = c("FrostDk", "UnholyDk", "HavocDh", "BalanceDruid", "FeralDruid", "BeastMasteryHunter", "MarksmanshipHunter", "SurvivalHunter", "ArcaneMage", "FireMage", "FrostMage", "WindwalkerMonk", "RetributionPaladin", "ShadowPriest", "AssassinationRogue", "OutlawRogue", "SubtletyRogue", "ElementalShaman", "EnhancementShaman", "AfflictionWarlock", "DemonologyWarlock", "DestructionWarlock", "ArmsWarrior", "FuryWarrior")
@@ -476,14 +488,35 @@ DpsPercentageOverTime <- function(Board, top = NULL, smooth = FALSE, discard = N
     Indicators <- Indicators[SpecInfo, on = 'Spec']
     Indicators <- Indicators[! is.na(Indicator)]
 
+    if (! is.null(role)) {
+        if (tolower(role) == "melee") {
+            Indicators <- Indicators[Role == "Melee"]
+            Title <- paste("Melee", Title)
+        }
+
+        if (tolower(role) == "ranged") {
+            Indicators <- Indicators[Role == "Ranged"]
+            Title <- paste("Ranged", Title)
+        }
+    }
+
+
     Tbl <- Board
-    Title <- "DPS spec popularity over time"
+
     if (! is.null(top)) {
-        Tbl <- Tbl[Success == TRUE]
         setorder(Tbl, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
         Tbl <- Tbl[, .SD[, .SD[.I < .N * top]], by = .(Dungeon, DayNr)]
         Title <- paste0(Title, " (top ", round(100*top), "% of runs)")
     }
+
+    if (is.null(MinLevel)) {
+        MinLevel <- 2
+    }
+    else {
+        Title <- paste0(Title, " (+", MinLevel, " and higher)")
+    }
+
+    Tbl <- Tbl[KeystoneLevel >= MinLevel]
 
     # TODO: super slow join:
     Summ <- Indicators[,
@@ -672,7 +705,7 @@ if (TRUE) {
     # Week <- Board[WeekNr == 34] # best week raging volcanic
     # Week <- Board[WeekNr == 35] # teeming explosive as comparison to previous season worst
 
-    Week <- Board[WeekNr == max(WeekNr)] # latest week
+    Week <- Board[WeekNr + 1 == max(WeekNr)] # latest week
 
     FirstTime <- min(Week$Datetime)
     LastTime <- max(Week$Datetime)
@@ -680,6 +713,12 @@ if (TRUE) {
     cat("    Statistics of a week.\n")
     cat(paste0("       First run ", FirstTime, "\n"))
     cat(paste0("       Last run  ", LastTime, "\n"))
+
+    # p <- 0.25
+    # Top <- Week[Success == TRUE]
+    # setorder(Top, DayNr, Dungeon, -KeystoneLevel, TimeMinutes)
+    # Top <- Top[, .SD[, .SD[.I < .N * p]], by = .(Dungeon, DayNr)]
+    # print(summary(Top$KeystoneLevel))
 
     SavePlotAsPng("keystone-level-heatmap.png", KeystoneLevelHeatmap(Week))
     SavePlotAsPng("success-by-dungeon.png", RunsByDungeon(Week, 15))
@@ -692,16 +731,18 @@ if (TRUE) {
 # Summary data across entire timespan of M+:
 #
 
-if (TRUE) {
+if (FALSE) {
     cat("    Statistics of entire time period.\n")
     cat(paste0("       First run ", min(Board$Datetime), "\n"))
     cat(paste0("       Last run  ", max(Board$Datetime), "\n"))
 
-    SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, top = 0.25))
+    # SavePlotAsPng("dps-season.png", DpsPercentageOverTime(Board, top = 0.25))
+    SavePlotAsPng("melee-dps-season.png", DpsPercentageOverTime(Board, top = 0.25, role = "melee"))
+    SavePlotAsPng("ranged-dps-season.png", DpsPercentageOverTime(Board, top = 0.25, role = "ranged"))
     # SavePlotAsPng("day-heatmap.png", DayHeatmap(Board, 15))
     # SavePlotAsPng("day-average-heatmap.png", DayAverageHeatmap(Board))
     SavePlotAsPng("healers-season.png", HealerPercentageOverTime(Board, top = 0.25))
-    SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board, top = 0.25))
+    SavePlotAsPng("tanks-season.png", TankPercentageOverTime(Board))
     SavePlotAsPng("timestamp.png", RunsPerDay(Board))
     # SavePlotAsPng("runs-per-week.png", RunsPerWeek(Board, 15))
     SavePlotAsPng("keystone-level.png", AvgKeystonePerDay(Board))
