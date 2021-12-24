@@ -34,11 +34,11 @@ pub enum Region {
 impl Region {
     pub fn gateway_uri(self) -> &'static str {
         match self {
-            Region::Eu => "https://eu.api.blizzard.com/",
-            Region::Us => "https://us.api.blizzard.com/",
-            Region::Kr => "https://kr.api.blizzard.com/",
-            Region::Tw => "https://tw.api.blizzard.com/",
-            Region::Cn => "https://gateway.battlenet.com.cn/",
+            Region::Eu => "https://eu.api.blizzard.com",
+            Region::Us => "https://us.api.blizzard.com",
+            Region::Kr => "https://kr.api.blizzard.com",
+            Region::Tw => "https://tw.api.blizzard.com",
+            Region::Cn => "https://gateway.battlenet.com.cn",
         }
     }
 
